@@ -361,3 +361,15 @@ class AgentAudit(Base):
     prompt_hash: Mapped[str | None] = mapped_column(String(64))
     tool_calls_json: Mapped[dict | None] = mapped_column(JSON)
     result_summary: Mapped[str | None] = mapped_column(Text)
+
+
+# --- Saved places (not in original MASTER_SPEC schema; supports maps tools) ---
+
+
+class SavedPlace(Base):
+    __tablename__ = "saved_place"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    address: Mapped[str] = mapped_column(String(300))
+    notes: Mapped[str | None] = mapped_column(Text)

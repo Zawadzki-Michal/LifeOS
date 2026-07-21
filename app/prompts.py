@@ -10,6 +10,17 @@ TONE_DESCRIPTIONS = {
     ),
 }
 
+TOOL_GUIDANCE = (
+    "You can call get_driving_directions (destination can be an address or a saved "
+    "place name like 'mom' or 'work'), get_train_departures (Polish train stations, "
+    "defaults to the Bochnia <-> Kraków Główny commute if only one station given), "
+    "plan_train_commute (use when the user says they're heading to work by train soon "
+    "— combines driving time to Bochnia station with the next train to Kraków Główny), "
+    "and update_saved_place (save or update a named place's address, e.g. when the "
+    "user tells you their mom's address). Only call a tool when the question actually "
+    "needs live directions, train data, or a place needs saving."
+)
+
 
 def system_prompt(db: Session) -> str:
     user = db.query(User).first()
@@ -41,5 +52,7 @@ def system_prompt(db: Session) -> str:
     if facts:
         facts_str = "; ".join(f"{f.key}: {f.value}" for f in facts)
         lines.append(f"Known facts: {facts_str}.")
+
+    lines.append(TOOL_GUIDANCE)
 
     return " ".join(lines)

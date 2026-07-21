@@ -2,7 +2,15 @@ import datetime as dt
 
 from sqlalchemy.orm import Session
 
-from app.models import Goal, GoalProgress, HouseholdMember, MetricDaily, User, UserFact
+from app.models import (
+    Goal,
+    GoalProgress,
+    HouseholdMember,
+    MetricDaily,
+    SavedPlace,
+    User,
+    UserFact,
+)
 
 
 def _seed_user(db: Session) -> None:
@@ -117,10 +125,22 @@ def _seed_facts(db: Session) -> None:
     )
 
 
+def _seed_places(db: Session) -> None:
+    if db.query(SavedPlace).first() is not None:
+        return
+    db.add(
+        SavedPlace(
+            name="home",
+            address="Juliusza Kossaka 30B, Nowy Wiśnicz, Poland",
+        )
+    )
+
+
 def seed_initial_data(db: Session) -> None:
     _seed_user(db)
     _seed_household(db)
     _seed_goals(db)
     _seed_metrics(db)
     _seed_facts(db)
+    _seed_places(db)
     db.commit()

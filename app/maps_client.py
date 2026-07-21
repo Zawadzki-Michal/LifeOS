@@ -4,6 +4,8 @@ import httpx
 
 from app import redis_client
 from app.config import settings
+from app.db import SessionLocal
+from app.models import SavedPlace
 
 DIRECTIONS_URL = "https://maps.googleapis.com/maps/api/directions/json"
 
@@ -24,19 +26,24 @@ def _maps_link(origin: str, destination: str, mode: str = "driving") -> str:
     return f"https://www.google.com/maps/dir/?{params}"
 
 
-async def get_driving_directions(chat_id: int, destination: str) -> str:
-    if not settings.google_maps_api_key:
-        return "Google Maps API key isn't configured yet, so I can't fetch directions."
+def _resolve_place_name(name: str) -> str:
+    with SessionLocal() as db:
+        place = db.query(SavedPlace).filter(SavedPlace.name.ilike(name.strip())).first()
+        return place.address if place else name
 
-    location = await redis_client.get_location(chat_id)
-    if location is None:
-        return (
-            "I don't have your current location on file — share it in Telegram "
-            "(attach → Location) and ask again."
-        )
 
-    origin = f"{location[0]},{location[1]}"
+async def upsert_saved_place(name: str, address: str) -> str:
+    with SessionLocal() as db:
+        place = db.query(SavedPlace).filter(SavedPlace.name.ilike(name.strip())).first()
+        if place:
+            place.address = address
+        else:
+            db.add(SavedPlace(name=name.strip().lower(), address=address))
+        db.commit()
+    return f"Saved '{name}' as {address}."
 
+
+async def _drive(origin: str, destination: str) -> str:
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
             DIRECTIONS_URL,
@@ -59,6 +66,22 @@ async def get_driving_directions(chat_id: int, destination: str) -> str:
         f"Driving to {destination}: {leg['duration']['text']} ({leg['distance']['text']}).\n"
         f"Open in Google Maps: {link}"
     )
+
+
+async def get_driving_directions(chat_id: int, destination: str) -> str:
+    if not settings.google_maps_api_key:
+        return "Google Maps API key isn't configured yet, so I can't fetch directions."
+
+    location = await redis_client.get_location(chat_id)
+    if location is None:
+        return (
+            "I don't have your current location on file — share it in Telegram "
+            "(attach → Location) and ask again."
+        )
+
+    origin = f"{location[0]},{location[1]}"
+    destination = _resolve_place_name(destination)
+    return await _drive(origin, destination)
 
 
 async def get_train_departures(origin_station: str, destination_station: str | None) -> str:
@@ -107,3 +130,16 @@ async def get_train_departures(origin_station: str, destination_station: str | N
         f"departs {details['departure_time']['text']}, "
         f"arrives {details['arrival_time']['text']} ({leg['duration']['text']})."
     )
+
+
+async def plan_train_commute() -> str:
+    if not settings.google_maps_api_key:
+        return "Google Maps API key isn't configured yet, so I can't plan the commute."
+
+    home = _resolve_place_name("home")
+    if home == "home":
+        return "I don't have your home address saved yet — tell me your home address first."
+
+    drive_summary = await _drive(home, "Bochnia train station, Poland")
+    train_summary = await get_train_departures("Bochnia", "Kraków Główny")
+    return f"{drive_summary}\n\n{train_summary}"
