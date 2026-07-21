@@ -42,7 +42,7 @@ async def chat_with_tools(
     messages: list[dict],
     tools: list[dict],
     executor: Callable[[str, dict], Awaitable[str]],
-    max_iters: int = 4,
+    max_iters: int = 6,
 ) -> dict:
     total_prompt_tokens = 0
     total_completion_tokens = 0

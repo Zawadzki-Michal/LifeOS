@@ -33,3 +33,19 @@ async def get_location(chat_id: int) -> tuple[float, float] | None:
         return None
     data = json.loads(raw)
     return data["lat"], data["lon"]
+
+
+# Google's access tokens expire in 1h; cache just under that so we're not
+# hitting the token endpoint on every calendar call.
+GOOGLE_ACCESS_TOKEN_TTL_SECONDS = 50 * 60
+_GOOGLE_ACCESS_TOKEN_KEY = "lifeos:google_calendar_access_token"
+
+
+async def get_cached_access_token() -> str | None:
+    return await _get_client().get(_GOOGLE_ACCESS_TOKEN_KEY)
+
+
+async def set_cached_access_token(token: str) -> None:
+    await _get_client().set(
+        _GOOGLE_ACCESS_TOKEN_KEY, token, ex=GOOGLE_ACCESS_TOKEN_TTL_SECONDS
+    )
