@@ -84,7 +84,9 @@ async def get_driving_directions(chat_id: int, destination: str) -> str:
     return await _drive(origin, destination)
 
 
-async def get_train_departures(origin_station: str, destination_station: str | None) -> str:
+async def get_train_departures(
+    origin_station: str, destination_station: str | None, count: int = 4
+) -> str:
     if not settings.google_maps_api_key:
         return "Google Maps API key isn't configured yet, so I can't fetch train times."
 
@@ -105,6 +107,7 @@ async def get_train_departures(origin_station: str, destination_station: str | N
                 "mode": "transit",
                 "transit_mode": "train",
                 "departure_time": "now",
+                "alternatives": "true",
                 "key": settings.google_maps_api_key,
             },
         )
@@ -118,18 +121,40 @@ async def get_train_departures(origin_station: str, destination_station: str | N
             "regional rail is sometimes incomplete — worth double-checking a PKP/Polregio app."
         )
 
-    leg = data["routes"][0]["legs"][0]
-    transit_step = next((s for s in leg["steps"] if s.get("travel_mode") == "TRANSIT"), None)
-    if transit_step is None:
+    departures = []
+    seen_departures = set()
+    for route in data["routes"]:
+        leg = route["legs"][0]
+        transit_step = next((s for s in leg["steps"] if s.get("travel_mode") == "TRANSIT"), None)
+        if transit_step is None:
+            continue
+        details = transit_step["transit_details"]
+        dep_ts = details["departure_time"]["value"]
+        if dep_ts in seen_departures:
+            continue
+        seen_departures.add(dep_ts)
+        line = details["line"].get("short_name") or details["line"].get("name", "train")
+        departures.append(
+            {
+                "ts": dep_ts,
+                "line": line,
+                "departs": details["departure_time"]["text"],
+                "arrives": details["arrival_time"]["text"],
+                "duration": leg["duration"]["text"],
+            }
+        )
+
+    if not departures:
         return f"No direct train found from {origin_station} to {destination_station} right now."
 
-    details = transit_step["transit_details"]
-    line = details["line"].get("short_name") or details["line"].get("name", "train")
-    return (
-        f"Next {line} from {origin_station} to {destination_station}: "
-        f"departs {details['departure_time']['text']}, "
-        f"arrives {details['arrival_time']['text']} ({leg['duration']['text']})."
-    )
+    departures.sort(key=lambda d: d["ts"])
+    departures = departures[:count]
+
+    lines = [
+        f"- {d['line']} departs {d['departs']}, arrives {d['arrives']} ({d['duration']})"
+        for d in departures
+    ]
+    return f"Next trains from {origin_station} to {destination_station}:\n" + "\n".join(lines)
 
 
 async def plan_train_commute() -> str:

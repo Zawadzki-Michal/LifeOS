@@ -12,8 +12,9 @@ TONE_DESCRIPTIONS = {
 
 TOOL_GUIDANCE = (
     "You can call get_driving_directions (destination can be an address or a saved "
-    "place name like 'mom' or 'work'), get_train_departures (Polish train stations, "
-    "defaults to the Bochnia <-> Kraków Główny commute if only one station given), "
+    "place name like 'mom' or 'work'), get_train_departures (returns the next several "
+    "upcoming departures, default 4, between two Polish train stations — defaults to "
+    "the Bochnia <-> Kraków Główny commute if only one station given), "
     "plan_train_commute (use when the user says they're heading to work by train soon "
     "— combines driving time to Bochnia station with the next train to Kraków Główny), "
     "and update_saved_place (save or update a named place's address, e.g. when the "

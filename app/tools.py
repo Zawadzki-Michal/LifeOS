@@ -30,8 +30,8 @@ TOOLS = [
         "function": {
             "name": "get_train_departures",
             "description": (
-                "Get the next train departure and arrival time between two Polish "
-                "train stations, e.g. Bochnia and Kraków Główny."
+                "Get the next several upcoming train departures (default 4) between "
+                "two Polish train stations, e.g. Bochnia and Kraków Główny."
             ),
             "parameters": {
                 "type": "object",
@@ -46,6 +46,10 @@ TOOLS = [
                             "Arrival station name. Optional if origin_station is "
                             "Bochnia or Kraków Główny — defaults to the other."
                         ),
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "How many upcoming departures to return. Defaults to 4.",
                     },
                 },
                 "required": ["origin_station"],
@@ -99,7 +103,9 @@ def make_executor(chat_id: int):
             return await maps_client.get_driving_directions(chat_id, args["destination"])
         if name == "get_train_departures":
             return await maps_client.get_train_departures(
-                args["origin_station"], args.get("destination_station")
+                args["origin_station"],
+                args.get("destination_station"),
+                args.get("count", 4),
             )
         if name == "plan_train_commute":
             return await maps_client.plan_train_commute()
