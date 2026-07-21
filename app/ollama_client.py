@@ -20,11 +20,16 @@ async def generate(model: str, prompt: str) -> str:
         return resp.json()["response"]
 
 
-async def chat(model: str, messages: list[dict]) -> str:
+async def chat(model: str, messages: list[dict]) -> dict:
     async with httpx.AsyncClient(timeout=180) as client:
         resp = await client.post(
             f"{settings.ollama_base_url}/api/chat",
             json={"model": model, "messages": messages, "stream": False},
         )
         resp.raise_for_status()
-        return resp.json()["message"]["content"]
+        data = resp.json()
+        return {
+            "content": data["message"]["content"],
+            "prompt_tokens": data.get("prompt_eval_count"),
+            "completion_tokens": data.get("eval_count"),
+        }
