@@ -16,6 +16,8 @@ class Settings(BaseSettings):
 
     openrouter_api_key: str = ""
 
+    google_maps_api_key: str = ""
+
     @field_validator("telegram_allowed_user_id", mode="before")
     @classmethod
     def _blank_to_none(cls, v):
