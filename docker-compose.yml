@@ -55,13 +55,14 @@ services:
       postgres:
         condition: service_healthy
 
-  # Quick Tunnel: no Cloudflare account/domain needed, gives a random
-  # *.trycloudflare.com HTTPS URL. Changes every restart — fine for now,
-  # switch to a named tunnel (TUNNEL_TOKEN) once you add a domain.
-  cloudflared:
-    image: cloudflare/cloudflared:latest
+  # ngrok tunnel using a free reserved static domain — stable across
+  # restarts (unlike Cloudflare's random Quick Tunnel URL).
+  ngrok:
+    image: ngrok/ngrok:latest
     restart: unless-stopped
-    command: tunnel --url http://app:8000
+    command: ["http", "--url=${NGROK_STATIC_DOMAIN}", "app:8000"]
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
     depends_on:
       - app
     profiles:

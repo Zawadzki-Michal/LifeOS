@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     telegram_allowed_user_id: int | None = None
 
     ollama_base_url: str = "http://host.docker.internal:11434"
+    ollama_model: str = "qwen3.6:35b-a3b"
 
     openrouter_api_key: str = ""
 
