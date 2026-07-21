@@ -49,6 +49,20 @@ This should trigger a real outbound Telegram message back to you.
    location with the bot (attach → Location) before asking for driving
    directions — it's cached in Redis for 12 hours and used as the origin.
 
+## Google Calendar (OAuth, one-time setup)
+
+Not wired into the app yet (Week 2 work) — this just gets the credentials/refresh token ready.
+
+1. In [Google Cloud Console](https://console.cloud.google.com), enable the Google Calendar API and create an OAuth client (Application type: **Desktop app**). Make sure the OAuth consent screen's **User type is External** (not Internal — Internal only works for Google Workspace org accounts) and add yourself as a test user.
+2. Put `client_id`/`client_secret` in `.env` as `GOOGLE_CALENDAR_CLIENT_ID` / `GOOGLE_CALENDAR_CLIENT_SECRET`.
+3. Run the one-time authorization script with the callback port published:
+   ```bash
+   docker compose run --rm -e PYTHONPATH=/code -e PYTHONUNBUFFERED=1 -p 8765:8765 app python -u scripts/google_calendar_auth.py
+   ```
+4. Open the printed URL in your own browser, approve access (click through the "Google hasn't verified this app" warning — expected for an app you own in Testing mode), and the script prints a refresh token. Put it in `.env` as `GOOGLE_CALENDAR_REFRESH_TOKEN`.
+
+On Windows/Git Bash, prefix docker commands that use bare `/path` style arguments (like `-e PYTHONPATH=/code`) with `MSYS_NO_PATHCONV=1` — otherwise Git Bash silently rewrites `/code` into a Windows path.
+
 ## ngrok tunnel (manual setup, not automated)
 
 The app is only reachable from the internet via an ngrok tunnel using a free reserved static domain — no port forwarding, no paid domain needed.
