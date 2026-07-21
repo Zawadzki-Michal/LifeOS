@@ -3,12 +3,13 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, Request
 
-from app import history, ollama_client
+from app import history, ollama_client, redis_client
 from app.config import settings
 from app.db import SessionLocal
 from app.models import InteractionLog
 from app.prompts import system_prompt
 from app.telegram_client import send_message
+from app.tools import TOOLS, make_executor
 
 logger = logging.getLogger("lifeos.telegram")
 
@@ -45,7 +46,9 @@ async def _reply_with_ollama(chat_id: int, text: str) -> None:
     )
 
     try:
-        result = await ollama_client.chat(settings.ollama_model, messages)
+        result = await ollama_client.chat_with_tools(
+            settings.ollama_model, messages, TOOLS, make_executor(chat_id)
+        )
         reply = result["content"]
         _log_interaction("in", result["prompt_tokens"])
         _log_interaction("out", result["completion_tokens"])
@@ -63,6 +66,13 @@ async def _handle_reset(chat_id: int) -> None:
     await send_message(chat_id, "Conversation reset.")
 
 
+async def _handle_location(chat_id: int, location: dict) -> None:
+    await redis_client.set_location(chat_id, location["latitude"], location["longitude"])
+    await send_message(
+        chat_id, "Got your location — I'll use it for directions until you share a new one."
+    )
+
+
 @router.post("/telegram/webhook")
 async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
     update = await request.json()
@@ -72,7 +82,6 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
 
     sender_id = message.get("from", {}).get("id")
     chat_id = message.get("chat", {}).get("id")
-    text = message.get("text", "")
 
     allowed = settings.telegram_allowed_user_id
     if allowed is None:
@@ -83,7 +92,16 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
         logger.info("Ignoring message from unauthorized user %s", sender_id)
         return {"ok": True}
 
-    if chat_id is None or not text:
+    if chat_id is None:
+        return {"ok": True}
+
+    location = message.get("location")
+    if location:
+        background_tasks.add_task(_handle_location, chat_id, location)
+        return {"ok": True}
+
+    text = message.get("text", "")
+    if not text:
         return {"ok": True}
 
     if text.strip() == "/reset":

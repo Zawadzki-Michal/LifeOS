@@ -44,6 +44,11 @@ curl -X POST localhost:8000/telegram/webhook \
 
 This should trigger a real outbound Telegram message back to you.
 
+4. To use the driving-directions and train-departure tools, put a Google Maps API
+   key (Directions API enabled) in `.env` as `GOOGLE_MAPS_API_KEY`. Share your
+   location with the bot (attach → Location) before asking for driving
+   directions — it's cached in Redis for 12 hours and used as the origin.
+
 ## ngrok tunnel (manual setup, not automated)
 
 The app is only reachable from the internet via an ngrok tunnel using a free reserved static domain — no port forwarding, no paid domain needed.
