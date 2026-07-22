@@ -402,3 +402,30 @@ class SavedPlace(Base):
     name: Mapped[str] = mapped_column(String(64), unique=True)
     address: Mapped[str] = mapped_column(String(300))
     notes: Mapped[str | None] = mapped_column(Text)
+
+
+# --- Web app chat sessions (not in original MASTER_SPEC schema; backs the
+# multi-session web UI and replaces Redis as the durable history store) ---
+
+
+class ChatSession(Base):
+    __tablename__ = "chat_session"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    channel: Mapped[str] = mapped_column(String(16))  # web|telegram
+    title: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_message"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("chat_session.id"))
+    role: Mapped[str] = mapped_column(String(16))  # user|assistant|tool
+    content: Mapped[str] = mapped_column(Text)
+    tool_calls_json: Mapped[dict | None] = mapped_column(JSON)
+    tokens: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))

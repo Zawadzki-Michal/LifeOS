@@ -77,7 +77,7 @@ TOOL_GUIDANCE = (
 )
 
 
-def system_prompt(db: Session) -> str:
+def system_prompt(db: Session, channel: str = "telegram") -> str:
     user = db.query(User).first()
     if user is None:
         return "You are LifeOS, a personal accountability assistant. Keep replies concise."
@@ -89,12 +89,21 @@ def system_prompt(db: Session) -> str:
         f"Tone: {tone}",
         f"Address him as {user.name}.",
         f"Current date/time: {now.strftime('%Y-%m-%d %H:%M')} ({now.strftime('%A')}), {TIMEZONE}.",
-        "Formatting: plain text only — this is Telegram and it does not render Markdown "
-        "here, so never use **bold**, # headers, or any markdown syntax; it would show up "
-        "as literal asterisks/hashes. Write like a text message: a few short sentences or "
-        "a plain line-broken list with a dash if you truly need one, not a structured "
-        "report with sections and headers.",
     ]
+    if channel == "telegram":
+        lines.append(
+            "Formatting: plain text only — this is Telegram and it does not render "
+            "Markdown here, so never use **bold**, # headers, or any markdown syntax; "
+            "it would show up as literal asterisks/hashes. Write like a text message: "
+            "a few short sentences or a plain line-broken list with a dash if you truly "
+            "need one, not a structured report with sections and headers."
+        )
+    else:
+        lines.append(
+            "Formatting: this surface renders Markdown, so use it naturally where it "
+            "helps (short bullet lists, **bold** for emphasis, code blocks for numbers/"
+            "data) — but stay concise, don't pad a short answer into a long report."
+        )
 
     household = db.query(HouseholdMember).all()
     if household:

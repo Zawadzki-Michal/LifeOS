@@ -24,6 +24,12 @@ class Settings(BaseSettings):
 
     health_sync_token: str = ""
 
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_redirect_uri: str = ""
+    webapp_allowed_emails: str = ""
+    webapp_secret_key: str = ""
+
     @field_validator("telegram_allowed_user_id", mode="before")
     @classmethod
     def _blank_to_none(cls, v):
