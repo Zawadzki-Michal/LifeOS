@@ -23,6 +23,12 @@ This document is a running record of what's actually been built, as a supplement
 - **iOS Safari auto-zoom fixed** — the chat input and sidebar rename input were `text-sm` (14px), under iOS's 16px auto-zoom-on-focus threshold; bumped to 16px below the `sm` breakpoint (unchanged 14px on desktop). Found via real iPhone 13 Pro Max testing.
 - **Dev workflow quirk worth remembering:** `docker-compose.yml` bind-mounts `./app` over the container's app directory (for live Python editing), which also shadows whatever the Docker image's multi-stage build baked into `app/static/`. So a frontend change needs `npm run build` run directly (from `webapp/`) to land in the bind-mounted `app/static/` — rebuilding the image alone won't update what the running dev container serves.
 
+### Test harness + CI (new — closes issue #4)
+- `tests/` (pytest) against a dedicated `lifeos_test` Postgres database — created automatically, table-truncated between tests, never touches the real dev DB. Covers `chat_service` (mocked Ollama), `finance_client`'s bill-rollover/budget-alert math, `tools.py`'s tool-dispatch table, the full `/api/sessions` CRUD+messaging API, and — via a dedicated throwaway database — that `alembic upgrade head` actually applies the full migration chain cleanly.
+- `.github/workflows/tests.yml` runs the suite on every push/PR against real Postgres (pgvector image) + Redis service containers.
+- Run locally: `docker compose run --rm app sh -c "pip install -r requirements-dev.txt && pytest -v"`. `requirements-dev.txt`, `pytest.ini`, and `tests/` are bind-mounted into the app container (same pattern as `alembic/`) so edits don't need an image rebuild.
+- Not exhaustive: `calendar_client`/`health_client`/`maps_client` all hit real external APIs and have zero automated coverage yet — still relies on manual verification, same as before.
+
 ### Infrastructure
 - Docker Compose stack: Postgres 16 + pgvector, Redis, n8n, FastAPI app — all running (`docker-compose.yml`)
 - Full V1 DB schema (27 tables from MASTER_SPEC §7) via SQLAlchemy models + Alembic migrations (`app/models.py`, `alembic/versions/`)
@@ -102,7 +108,7 @@ Worth knowing about so nobody "fixes" these back by accident:
 ## 4. Known gaps / things observed
 
 - **Tool-calling isn't 100% reliable.** During calendar testing, one identical request produced a real tool call in isolation but appeared to skip tool-calling entirely in one live run (see conversation history around the "family movie night" test) — a 35B local model's tool-choice decisions have real variance. No mitigation built yet beyond "the reply always states what happened, so mistakes are visible."
-- **No automated tests.** Every verification so far has been manual (direct API calls, live Telegram messages). Issue #4 (pytest + CI) is still open.
+- **Automated tests now exist** (issue #4, closed) — `tests/` + GitHub Actions, see "What's live" below. Still true that most of this codebase's history was built on manual verification alone, and the finance/tool-dispatch/migration coverage added here is a first pass, not exhaustive — calendar_client and health_client (both hit real external APIs) still have no automated coverage.
 - **Proactive messaging exists but is finance-only.** The spec's key differentiator (assistant messages first) is now real for bill reminders/budget alerts, but the actual morning brief (06:45) and evening review (21:00) from the spec still don't exist. See recommendation below.
 - **The LLM will confabulate a fake system limitation rather than admit a missing tool.** Caught it telling the user "the system doesn't allow deleting expense history" when the real issue was simply that no delete tool existed yet. Added an explicit prompt rule ("say so plainly, never claim a fake limitation") and the missing tools, but worth watching for the same pattern elsewhere as new capability gaps get hit.
 - **Third-party data export formats need real-payload verification, not just docs.** The Health Auto Export JSON schema docs showed generic examples that didn't match this account's actual units (kJ vs kcal, hours vs minutes for sleep) — both silently produced wildly wrong numbers (7164 kcal for one day) until checked against a real captured payload. Worth remembering for any future third-party integration: verify against a live sample, don't trust the reference docs' example values.
@@ -122,8 +128,8 @@ Morning/evening messages are now genuinely rich (health + calendar + goals + wei
 ### 2. Semantic memory / fact-saving with confirmation
 Right now "remember X" tools (`update_saved_place`) write immediately with no review step — fine for places, riskier for arbitrary personal facts. The spec's `user_fact` table + confirm flow (§6.3, §8.7) would make the persona genuinely improve over time instead of only knowing what was manually seeded.
 
-### 3. Test harness + CI (issue #4)
-Not urgent functionally, but every feature so far has only ever been manually verified — a regression in `prompts.py`, `calendar_client.py`, or `finance_client.py`'s bill-rollover math wouldn't be caught until someone notices a bad Telegram reply. The hallucinated-confirmation and empty-reply bugs found this session were both only caught because of manual end-to-end testing against real data — worth doing before the codebase gets much bigger.
+### 3. ~~Test harness + CI~~ — done (issue #4, closed)
+`tests/` (pytest) + `.github/workflows/tests.yml` now cover `chat_service`, the `/api/sessions` API, `finance_client`'s bill-rollover/budget logic, `tools.py`'s dispatch table, and that `alembic upgrade head` actually applies cleanly. Runs against a dedicated `lifeos_test` database, never the real one. Not exhaustive — `calendar_client`/`health_client`/`maps_client` (all live external API calls) still have zero coverage; worth doing if/when those become a source of regressions rather than continuing to rely on manual verification for them.
 
 ### 4. Redaction Gateway (issue #10)
 Correctly deferred — no cloud calls exist yet to redact against. Becomes urgent the moment OpenRouter/Claude gets wired in for harder reasoning (spec's Week 4-5 "coaching decisions, plan changes").

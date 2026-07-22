@@ -51,6 +51,9 @@ services:
       - ./app:/code/app
       - ./alembic:/code/alembic
       - ./alembic.ini:/code/alembic.ini
+      - ./tests:/code/tests
+      - ./pytest.ini:/code/pytest.ini
+      - ./requirements-dev.txt:/code/requirements-dev.txt
     depends_on:
       postgres:
         condition: service_healthy
