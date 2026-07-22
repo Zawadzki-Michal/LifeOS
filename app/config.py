@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     google_calendar_client_secret: str = ""
     google_calendar_refresh_token: str = ""
 
+    health_sync_token: str = ""
+
     @field_validator("telegram_allowed_user_id", mode="before")
     @classmethod
     def _blank_to_none(cls, v):

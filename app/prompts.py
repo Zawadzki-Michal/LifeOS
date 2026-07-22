@@ -60,6 +60,10 @@ TOOL_GUIDANCE = (
     "Take these actions immediately and state the exact numbers back. If asked to "
     "delete/remove something you don't have a tool for, say so plainly — never "
     "claim a fake system limitation. "
+    "get_health_summary (period 'today'/'week'/'month') gives steps, active kcal, "
+    "sleep, resting heart rate, and workouts from Apple Health sync — use it for "
+    "any question about activity, sleep, or workouts. There's no log_workout/log_sleep "
+    "tool — that data arrives automatically from the phone, don't offer to log it manually. "
     "Only call a tool when the question actually needs live data or a change to be made."
 )
 
@@ -76,6 +80,11 @@ def system_prompt(db: Session) -> str:
         f"Tone: {tone}",
         f"Address him as {user.name}.",
         f"Current date/time: {now.strftime('%Y-%m-%d %H:%M')} ({now.strftime('%A')}), {TIMEZONE}.",
+        "Formatting: plain text only — this is Telegram and it does not render Markdown "
+        "here, so never use **bold**, # headers, or any markdown syntax; it would show up "
+        "as literal asterisks/hashes. Write like a text message: a few short sentences or "
+        "a plain line-broken list with a dash if you truly need one, not a structured "
+        "report with sections and headers.",
     ]
 
     household = db.query(HouseholdMember).all()

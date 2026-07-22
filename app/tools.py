@@ -1,6 +1,6 @@
 """Tool definitions exposed to the local model via Ollama's tool-calling."""
 
-from app import calendar_client, finance_client, maps_client
+from app import calendar_client, finance_client, health_client, maps_client
 
 TOOLS = [
     {
@@ -467,6 +467,27 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_health_summary",
+            "description": (
+                "Get an Apple Health/Fitness summary for a period — steps, active "
+                "energy burned, sleep, resting heart rate, and workouts. Use for "
+                "questions like 'how did I sleep this week' or 'how active was I "
+                "today'. Data only exists from whenever Apple Health sync was set up."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "period": {
+                        "type": "string",
+                        "description": "'today', 'week', or 'month' (default 'week').",
+                    }
+                },
+            },
+        },
+    },
 ]
 
 
@@ -557,6 +578,8 @@ def make_executor(chat_id: int):
             return await finance_client.delete_expense(args["expense_id"])
         if name == "delete_bill":
             return await finance_client.delete_bill(args.get("name"), args.get("bill_id"))
+        if name == "get_health_summary":
+            return await health_client.get_health_summary(args.get("period", "week"))
         return f"Unknown tool: {name}"
 
     return execute
