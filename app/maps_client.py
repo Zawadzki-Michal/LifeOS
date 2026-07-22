@@ -1,4 +1,6 @@
+import datetime as dt
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -6,6 +8,8 @@ from app import redis_client
 from app.config import settings
 from app.db import SessionLocal
 from app.models import SavedPlace
+
+TZ = ZoneInfo("Europe/Warsaw")
 
 DIRECTIONS_URL = "https://maps.googleapis.com/maps/api/directions/json"
 
@@ -85,7 +89,11 @@ async def get_driving_directions(chat_id: int, destination: str) -> str:
 
 
 async def get_train_departures(
-    origin_station: str, destination_station: str | None, count: int = 4
+    origin_station: str,
+    destination_station: str | None,
+    count: int = 4,
+    departure_time_iso: str | None = None,
+    arrival_time_iso: str | None = None,
 ) -> str:
     if not settings.google_maps_api_key:
         return "Google Maps API key isn't configured yet, so I can't fetch train times."
@@ -98,6 +106,23 @@ async def get_train_departures(
                 "Bochnia ↔ Kraków Główny commute pair without one."
             )
 
+    time_params = {}
+    if arrival_time_iso:
+        arr_dt = dt.datetime.fromisoformat(arrival_time_iso)
+        if arr_dt.tzinfo is None:
+            arr_dt = arr_dt.replace(tzinfo=TZ)
+        time_params["arrival_time"] = int(arr_dt.timestamp())
+        when_label = f"arriving by {arr_dt.strftime('%Y-%m-%d %H:%M')}"
+    elif departure_time_iso:
+        dep_dt = dt.datetime.fromisoformat(departure_time_iso)
+        if dep_dt.tzinfo is None:
+            dep_dt = dep_dt.replace(tzinfo=TZ)
+        time_params["departure_time"] = int(dep_dt.timestamp())
+        when_label = f"around {dep_dt.strftime('%Y-%m-%d %H:%M')}"
+    else:
+        time_params["departure_time"] = "now"
+        when_label = "right now"
+
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
             DIRECTIONS_URL,
@@ -106,9 +131,9 @@ async def get_train_departures(
                 "destination": f"{destination_station}, Poland",
                 "mode": "transit",
                 "transit_mode": "train",
-                "departure_time": "now",
                 "alternatives": "true",
                 "key": settings.google_maps_api_key,
+                **time_params,
             },
         )
         resp.raise_for_status()
@@ -117,8 +142,9 @@ async def get_train_departures(
     if data.get("status") != "OK" or not data.get("routes"):
         return (
             f"Couldn't find a train from {origin_station} to {destination_station} "
-            f"({data.get('status', 'unknown error')}). Google's transit data for Polish "
-            "regional rail is sometimes incomplete — worth double-checking a PKP/Polregio app."
+            f"{when_label} ({data.get('status', 'unknown error')}). Google's "
+            "transit data for Polish regional rail is sometimes incomplete — worth "
+            "double-checking a PKP/Polregio app."
         )
 
     departures = []
@@ -145,16 +171,24 @@ async def get_train_departures(
         )
 
     if not departures:
-        return f"No direct train found from {origin_station} to {destination_station} right now."
+        return f"No direct train found from {origin_station} to {destination_station} {when_label}."
 
-    departures.sort(key=lambda d: d["ts"])
-    departures = departures[:count]
+    if arrival_time_iso:
+        # Latest departures that still make the deadline are what's actually
+        # useful here (maximizes sleep-in/prep time) — not the earliest ones,
+        # which could be hours before the target arrival for no reason.
+        departures.sort(key=lambda d: d["ts"], reverse=True)
+        departures = departures[:count]
+        departures.sort(key=lambda d: d["ts"])
+    else:
+        departures.sort(key=lambda d: d["ts"])
+        departures = departures[:count]
 
     lines = [
         f"- {d['line']} departs {d['departs']}, arrives {d['arrives']} ({d['duration']})"
         for d in departures
     ]
-    return f"Next trains from {origin_station} to {destination_station}:\n" + "\n".join(lines)
+    return f"Trains {when_label} from {origin_station} to {destination_station}:\n" + "\n".join(lines)
 
 
 async def plan_train_commute() -> str:

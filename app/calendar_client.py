@@ -1,4 +1,5 @@
 import datetime as dt
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -7,6 +8,7 @@ from app.config import settings
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 CALENDAR_API_BASE = "https://www.googleapis.com/calendar/v3"
+TZ = ZoneInfo("Europe/Warsaw")
 
 
 def _configured() -> bool:
@@ -93,6 +95,87 @@ async def list_upcoming_events(days_ahead: int = 7, calendar: str = "primary") -
         title = ev.get("summary", "(no title)")
         lines.append(f"- [{ev['id']}] {title} — {start}")
     return "Upcoming events:\n" + "\n".join(lines)
+
+
+async def fetch_day_events(
+    target_date: dt.date, calendars: list[str]
+) -> list[tuple[str, str, dt.datetime | None]]:
+    """Fetches events for one local calendar day across multiple calendars.
+    Returns (title, display_start, start_dt) tuples — start_dt is None for
+    all-day events, which have no meaningful past/future comparison."""
+    if not _configured():
+        return []
+
+    token = await _get_access_token()
+    start_local = dt.datetime.combine(target_date, dt.time.min, tzinfo=TZ)
+    end_local = dt.datetime.combine(target_date, dt.time.max, tzinfo=TZ)
+
+    results: list[tuple[str, str, dt.datetime | None]] = []
+    async with httpx.AsyncClient(timeout=10) as client:
+        for calendar in calendars:
+            cal_id = await _resolve_calendar_id(calendar)
+            resp = await client.get(
+                f"{CALENDAR_API_BASE}/calendars/{cal_id}/events",
+                headers={"Authorization": f"Bearer {token}"},
+                params={
+                    "timeMin": start_local.astimezone(dt.timezone.utc).isoformat(),
+                    "timeMax": end_local.astimezone(dt.timezone.utc).isoformat(),
+                    "singleEvents": "true",
+                    "orderBy": "startTime",
+                    "timeZone": "Europe/Warsaw",
+                },
+            )
+            resp.raise_for_status()
+            for ev in resp.json().get("items", []):
+                title = ev.get("summary", "(no title)")
+                label = f" ({calendar})" if calendar != "primary" else ""
+                start_dt_str = ev.get("start", {}).get("dateTime")
+                if start_dt_str:
+                    results.append((f"{title}{label}", start_dt_str, dt.datetime.fromisoformat(start_dt_str)))
+                else:
+                    all_day = ev.get("start", {}).get("date", "")
+                    results.append((f"{title}{label}", all_day, None))
+    return results
+
+
+async def list_today_events(calendars: list[str] | None = None) -> str:
+    """Used internally by the morning scheduler message. Events already
+    started by 'now' are explicitly labeled as such — the model has
+    repeatedly failed to reliably work this out itself from a separate
+    current-time line elsewhere in the prompt, so it's computed here instead."""
+    if not _configured():
+        return "Google Calendar isn't connected yet."
+
+    now = dt.datetime.now(TZ)
+    events = await fetch_day_events(now.date(), calendars or ["primary", "family"])
+    if not events:
+        return "Nothing on the calendar today."
+
+    lines = []
+    for title, start_str, start_dt in events:
+        if start_dt is None:
+            lines.append(f"- {title} — all day")
+        elif start_dt <= now:
+            lines.append(
+                f"- {title} — {start_str} (this has already started/passed — ask "
+                f"whether it happened, don't remind about it as if upcoming)"
+            )
+        else:
+            lines.append(f"- {title} — {start_str} (upcoming)")
+    return "Today:\n" + "\n".join(lines)
+
+
+async def list_tomorrow_events(calendars: list[str] | None = None) -> str:
+    """Used internally by the evening scheduler message — strictly tomorrow's
+    calendar date, not a rolling 24h window from now."""
+    if not _configured():
+        return "Google Calendar isn't connected yet."
+    tomorrow = (dt.datetime.now(TZ) + dt.timedelta(days=1)).date()
+    events = await fetch_day_events(tomorrow, calendars or ["primary", "family"])
+    if not events:
+        return "Nothing on the calendar tomorrow."
+    lines = [f"- {title} — {start_str or 'all day'}" for title, start_str, _ in events]
+    return "Tomorrow:\n" + "\n".join(lines)
 
 
 async def create_event(

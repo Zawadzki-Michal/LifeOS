@@ -1,7 +1,7 @@
 # LifeOS — Progress Log & Next Steps
 
 **Last updated:** 2026-07-22
-**Status:** Well ahead of the roadmap's Week 1 milestone on raw capability. Finance MCP and Apple Health sync are both fully live, and the proactive scheduler now sends real morning/evening messages (health-aware) in addition to finance alerts — see Recommended Next Steps for what's still missing.
+**Status:** Well ahead of the roadmap's Week 1 milestone on raw capability. Finance MCP and Apple Health sync are both fully live, and the proactive scheduler's morning/evening messages now genuinely fold together health, calendar (primary + family), goal progress, weight, and a real computed train commute — not just a health-only ping. See Recommended Next Steps for what's still missing.
 
 This document is a running record of what's actually been built, as a supplement to `00-MASTER_SPEC.md` (the locked design) and `01-HANDOFF.md` (quick context). Update it as work lands — it's meant to answer "what's real right now" without having to read every commit.
 
@@ -38,15 +38,22 @@ This document is a running record of what's actually been built, as a supplement
   - Also tested the app's alternate MCP server mode (`Server` tab, live pull instead of scheduled push) — works, but the server stops the instant the app is backgrounded, so it's only viable for on-demand foreground queries, not anything scheduled. Kept the webhook as the reliable always-on path; the MCP route is a possible future supplementary source, not wired in yet.
 
 ### Proactive scheduler (`app/scheduler.py`) — now sends real morning/evening messages
-- Three independent daily `asyncio` loops (no new dependency — deliberately not n8n or APScheduler), each sleeping until its own next occurrence in Europe/Warsaw: **07:00 morning motivation** (Qwen-composed, references yesterday's Health snapshot), **08:00 finance checks** (unchanged from before), **21:00 evening feedback** (Qwen-composed, references today's Health data as of the last sync)
-- Finance checks: Telegram reminder exactly `reminder_days_before` days ahead of a bill's due date; auto-posts fixed bills same as the on-demand path; nudges (daily, until resolved) for variable bills awaiting confirmation; budget alerts at 80%/100% thresholds (deduped via `expense_category.last_budget_alert`)
-- **Still not the full spec brief/review** — the morning/evening messages are health-aware but don't yet fold in calendar events, goals progress, or a structured 5-7 question evening review. See Recommended Next Steps.
+- Three independent daily `asyncio` loops (no new dependency — deliberately not n8n or APScheduler), each sleeping until its own next occurrence in Europe/Warsaw: **07:00 morning motivation**, **08:00 finance checks** (unchanged from before), **21:00 evening feedback**
+- Morning/evening are both Qwen-composed and now fold together: health snapshot (yesterday for morning, today for evening), today's/tomorrow's calendar across **both primary and family calendars**, this week's gym/squash goal progress vs. actual synced workouts (`health_client.get_workout_goal_progress`), latest synced weight vs. the weight goal, and — when an "Office"-titled calendar event exists — a real computed train commute (see below)
+- **Calendar events are labeled past/upcoming in code, not left for the model to work out.** `calendar_client.list_today_events` compares each event's start time against "now" and explicitly tags it `(already started/passed)` or `(upcoming)` — the model was not reliably cross-referencing a bare event timestamp against the separate "current time" line elsewhere in the prompt on its own, so it's computed deterministically instead (same philosophy as the Markdown fix).
+- **Auto-computed office commute** (`scheduler._office_commute_note`): detects an "office" event on the relevant day and calls `get_train_departures` with the new `arrival_time_iso` option (below) to find real trains that arrive on time, lists all of them (not just one) so the choice stays with the user.
+- Finance checks: Telegram reminder exactly `reminder_days_before` days ahead of a bill's due date; auto-posts fixed bills same as the on-demand path; nudges (daily, until resolved) for variable bills awaiting confirmation; budget alerts at 80%/100% thresholds (deduped via `expense_category.last_budget_alert`); also now checks `health_client.check_sync_health()` and warns if Apple Health hasn't synced in 2+ days.
 - **Telegram output is sanitized, not just prompted.** The model repeatedly ignored a "no Markdown" system-prompt instruction (kept generating `**bold**`/`#` headers, which Telegram displays as literal asterisks/hashes with no `parse_mode` set) — fixed by stripping Markdown syntax deterministically in `telegram_client.send_message` itself, the actual send boundary, rather than continuing to rely on prompt compliance.
+- **Still not the full spec evening review** — it's a one-way wrap-up, not the spec's interactive 5-7 question flow. See Recommended Next Steps.
+
+### Maps: arrival-time queries (`app/maps_client.py`)
+- `get_train_departures` now accepts `arrival_time_iso` (in addition to the existing `departure_time_iso`) — answers "what time do I need to leave to be there by X" using Google Directions API's `arrival_time` parameter, correctly returning the **latest** valid departures (sorted descending, then re-sorted for display), not the earliest ones hours before the deadline, which was the actual bug caught during testing.
 
 ### GitHub
-- Issue #17 (retroactive Week 1 tracking) and #5 (secrets policy) closed
-- PR #18 (Maps tool-calling, opened by a separate session) merged
-- 9 commits pushed to `master`, full history below
+- Issues #17 (retroactive Week 1 tracking), #5 (secrets policy), #16 (Finance MCP), #7 (bill reminders) closed
+- Issues #14 (morning brief composer) and #15 (evening review flow) commented with partial-progress status — real brief/wrap-up now exists, but not the full Orchestrator-agent/interactive-review scope, left open
+- PR #18 (Maps tool-calling), #19 (Finance MCP), #20 (Apple Health sync) merged
+- Commits pushed to `master`, full history below
 
 ---
 
@@ -86,6 +93,8 @@ Worth knowing about so nobody "fixes" these back by accident:
 - **The LLM will confabulate a fake system limitation rather than admit a missing tool.** Caught it telling the user "the system doesn't allow deleting expense history" when the real issue was simply that no delete tool existed yet. Added an explicit prompt rule ("say so plainly, never claim a fake limitation") and the missing tools, but worth watching for the same pattern elsewhere as new capability gaps get hit.
 - **Third-party data export formats need real-payload verification, not just docs.** The Health Auto Export JSON schema docs showed generic examples that didn't match this account's actual units (kJ vs kcal, hours vs minutes for sleep) — both silently produced wildly wrong numbers (7164 kcal for one day) until checked against a real captured payload. Worth remembering for any future third-party integration: verify against a live sample, don't trust the reference docs' example values.
 - **Prompt-only instructions to the local model are not reliable enough for hard constraints.** Told it not to use Markdown (Telegram doesn't render it) directly in the system prompt — it ignored this twice in a row. Fixed by enforcing it in code instead (strip Markdown at the `send_message` boundary). General lesson: anything that must always hold should be enforced deterministically in code, not left to model compliance, even with explicit instructions.
+- **The model will hallucinate a full, convincing action confirmation without ever calling the tool.** Asked it to create a calendar event; it replied "Done — added Work@Backbase Office 09:00-17:00 and Gym 17:00-18:00" with specific plausible times, using facts already in its persona context (the real Backbase office). Checked Redis chat history + Ollama call count: only one round-trip happened, meaning zero tool calls — the whole confirmation was invented. The actual calendar was empty. This is worse than the earlier "fake system limitation" confabulation because it fabricates a *successful outcome* with specific details, not just a refusal. Added explicit prompt language ("never reply as if you created/updated/deleted something unless you actually called the tool this turn"), but per the lesson above, prompting alone is not a complete fix — always verify a claimed write against the actual data source when in doubt, don't trust the chat reply.
+- **An empty model reply crashes the Telegram send with zero visible feedback.** Same incident: the follow-up message's reply came back as `""`, which Telegram's `sendMessage` rejects with 400 — and since nothing caught that exception, the user's message was silently dropped with literally no reply, visible only in server logs. Fixed with a guard in `routers/telegram.py` that substitutes a fallback message when the reply is empty, and wrapped the final `send_message` call in try/except so a Telegram-side failure can't crash the background task silently again.
 
 ---
 
@@ -93,14 +102,14 @@ Worth knowing about so nobody "fixes" these back by accident:
 
 In rough priority order, with reasoning:
 
-### 1. Fold calendar + goals into the morning/evening messages — highest leverage
-The scheduler now sends real 07:00/21:00 messages, but they're health-data-only. What's left is composing the fuller spec brief (calendar events + active goals + fixed monthly overhead alongside the Health snapshot) and turning the evening message into the spec's actual 5-7 question structured review rather than a one-way status ping. The trigger, Telegram send, and persona composition are all already proven — this is composition work, not new infrastructure.
+### 1. The spec's actual interactive 5-7 question evening review — highest leverage remaining
+Morning/evening messages are now genuinely rich (health + calendar + goals + weight + commute), but the evening one is still a one-way wrap-up, not the spec's interactive review that captures the day's answers back into the DB (mood, family time, reflections). Everything needed (trigger, Telegram send, persona composition) is proven; this is a conversational-flow design problem, not new infrastructure.
 
 ### 2. Semantic memory / fact-saving with confirmation
 Right now "remember X" tools (`update_saved_place`) write immediately with no review step — fine for places, riskier for arbitrary personal facts. The spec's `user_fact` table + confirm flow (§6.3, §8.7) would make the persona genuinely improve over time instead of only knowing what was manually seeded.
 
 ### 3. Test harness + CI (issue #4)
-Not urgent functionally, but every feature so far has only ever been manually verified — a regression in `prompts.py`, `calendar_client.py`, or now `finance_client.py`'s bill-rollover math wouldn't be caught until someone notices a bad Telegram reply. Worth doing before the codebase gets much bigger.
+Not urgent functionally, but every feature so far has only ever been manually verified — a regression in `prompts.py`, `calendar_client.py`, or `finance_client.py`'s bill-rollover math wouldn't be caught until someone notices a bad Telegram reply. The hallucinated-confirmation and empty-reply bugs found this session were both only caught because of manual end-to-end testing against real data — worth doing before the codebase gets much bigger.
 
 ### 4. Redaction Gateway (issue #10)
 Correctly deferred — no cloud calls exist yet to redact against. Becomes urgent the moment OpenRouter/Claude gets wired in for harder reasoning (spec's Week 4-5 "coaching decisions, plan changes").
