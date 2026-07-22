@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from app.models import Goal, HouseholdMember, User, UserFact
+from app.models import ExpenseCategory, Goal, HouseholdMember, User, UserFact
 
 TIMEZONE = "Europe/Warsaw"
 
@@ -32,8 +32,35 @@ TOOL_GUIDANCE = (
     "calendar. To update or delete an event you don't already have the id for from this "
     "conversation, call list_calendar_events first to find it. Take calendar actions "
     "immediately without asking for confirmation first, and always state the exact "
-    "resulting date/time in your reply so mistakes are easy to catch. Only call a tool "
-    "when the question actually needs live data or a change to be made."
+    "resulting date/time in your reply so mistakes are easy to catch. "
+    "For money: log_expense (amounts in PLN; categories aren't fixed, use whatever "
+    "fits and it's created automatically — no need to call add_expense_category "
+    "first unless the user explicitly wants to set a budget), get_spending_summary "
+    "(totals for 'today'/'week'/'month', optionally filtered to one category — use "
+    "this for questions like 'how much have I spent this month' or 'how much on "
+    "groceries this week'), list_bills (upcoming recurring bills), and add_bill (new "
+    "recurring bill, e.g. 'my mortgage is 2550 zl on the 12th every month' — once "
+    "added it posts automatically as an expense every cycle on its own, no need to "
+    "log it again each month — category is required, always pick one). Set "
+    "amount_is_fixed=false on add_bill for a bill whose amount changes every cycle "
+    "(e.g. a utility bill) — it then won't auto-post; use log_bill_payment to confirm "
+    "the actual amount when it's due (this also works to override a normally-fixed "
+    "bill for one cycle, e.g. an extra mortgage payment). update_bill changes an "
+    "existing bill's amount/due day/recurrence/category — only pass the fields that "
+    "change. get_fixed_monthly_overhead sums all bills into a monthly figure for "
+    "questions like 'what are my fixed costs' or 'what's locked in before I can save'. "
+    "list_recent_expenses (individual expenses with their id, use this to find an id "
+    "before deleting), delete_expense (removes one logged expense by id), and "
+    "delete_bill (stops a recurring bill from auto-posting further, by name or id — "
+    "does not remove expenses it already posted; if it reports multiple bills with "
+    "that name, call again with the bill_id it gives you). Prefer reusing one of the "
+    "existing categories listed below over inventing a new one (e.g. use 'mortgage', "
+    "not 'housing'; all streaming/cloud subscriptions share 'subscriptions', not one "
+    "category each) — only create a new category if nothing listed genuinely fits. "
+    "Take these actions immediately and state the exact numbers back. If asked to "
+    "delete/remove something you don't have a tool for, say so plainly — never "
+    "claim a fake system limitation. "
+    "Only call a tool when the question actually needs live data or a change to be made."
 )
 
 
@@ -69,6 +96,10 @@ def system_prompt(db: Session) -> str:
     if facts:
         facts_str = "; ".join(f"{f.key}: {f.value}" for f in facts)
         lines.append(f"Known facts: {facts_str}.")
+
+    categories = db.query(ExpenseCategory).order_by(ExpenseCategory.name).all()
+    if categories:
+        lines.append("Existing expense categories: " + ", ".join(c.name for c in categories) + ".")
 
     lines.append(TOOL_GUIDANCE)
 
