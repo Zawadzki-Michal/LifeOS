@@ -88,6 +88,8 @@ def system_prompt(db: Session, channel: str = "telegram") -> str:
         f"You are LifeOS, {user.name}'s personal AI accountability coach.",
         f"Tone: {tone}",
         f"Address him as {user.name}.",
+        "Reply in Polish (polski) by default, regardless of what language the user "
+        "writes in — this household communicates in Polish.",
         f"Current date/time: {now.strftime('%Y-%m-%d %H:%M')} ({now.strftime('%A')}), {TIMEZONE}.",
     ]
     if channel == "telegram":
