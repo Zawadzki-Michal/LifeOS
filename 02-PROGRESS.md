@@ -1,13 +1,27 @@
 # LifeOS — Progress Log & Next Steps
 
 **Last updated:** 2026-07-22
-**Status:** Well ahead of the roadmap's Week 1 milestone on raw capability. Finance MCP and Apple Health sync are both fully live, and the proactive scheduler's morning/evening messages now genuinely fold together health, calendar (primary + family), goal progress, weight, and a real computed train commute — not just a health-only ping. See Recommended Next Steps for what's still missing.
+**Status:** Well ahead of the roadmap's Week 1 milestone on raw capability. Finance MCP and Apple Health sync are both fully live, and the proactive scheduler's morning/evening messages now genuinely fold together health, calendar (primary + family), goal progress, weight, and a real computed train commute — not just a health-only ping. A second UI (web app, multi-session, Google-authenticated, mobile-responsive with dark mode) now sits alongside the Telegram bot — see §1 "Web app" below and `03-WEBAPP-PLAN.md`. See Recommended Next Steps for what's still missing.
 
 This document is a running record of what's actually been built, as a supplement to `00-MASTER_SPEC.md` (the locked design) and `01-HANDOFF.md` (quick context). Update it as work lands — it's meant to answer "what's real right now" without having to read every commit.
 
 ---
 
 ## 1. What's live right now
+
+### Web app (new — see 03-WEBAPP-PLAN.md for design)
+- Second UI alongside Telegram: a React/Vite SPA served by FastAPI itself (`webapp/` → built into `app/static/`, mounted at `/`), same persona/tools/data, single-tenant. Live-verified end-to-end via a real browser session: login gate, session create/rename/delete, Markdown-rendered replies, sidebar sorted by recency.
+- `app/chat_service.py` — the system-prompt + tool-calling + logging core extracted out of the Telegram router, now shared by both surfaces so they can't drift apart. `app/prompts.py::system_prompt` is channel-aware: Telegram still gets the "no Markdown" instruction, the web app gets a Markdown-friendly one.
+- `chat_session`/`chat_message` tables (Postgres) replace Redis as the durable history store; `app/history.py` (Redis-based) is retired. Telegram keeps exactly one persistent `channel='telegram'` session (matches its old single-thread behavior exactly — verified via live smoke test, including `/reset`); the web app can create unlimited sessions via `/api/sessions`.
+- Auth is Google OAuth (`app/auth.py`, `app/routers/auth.py`), gated by a `WEBAPP_ALLOWED_EMAILS` allow-list, signed session cookie (`itsdangerous`). This is a login-mechanism swap only, **not** multi-tenancy — every allowed email sees the same single-tenant data. A second real person still means a second full deployment, per §5 below.
+- `/api/sessions*` (`app/routers/sessions.py`, `app/chat_store.py`) — full CRUD + messaging, channel-scoped so the web API can't touch Telegram's session. Auto-titles a session from its first message.
+- Adminer added to `docker-compose.yml`, bound to `127.0.0.1:8081` only — deliberately never routed through the ngrok tunnel (raw SQL edit access is a bigger risk than the app itself). Solves "no way to see/edit the DB without asking the AI" directly.
+- **Google OAuth is fully live** — the Web application client is created, `.env` is filled in, and login has been verified end-to-end with the real account (not just a manually-minted test cookie).
+- **Mobile-responsive** — the sidebar is a slide-in drawer with a hamburger + backdrop below the `md` breakpoint (confirmed broken before this on a real 375×812 viewport — the fixed sidebar ate most of the screen). Rename/archive icons, which were hover-only (unreachable on any touch device), are now always visible on mobile and hover-reveal only on desktop.
+- **Dark mode** — toggle in the sidebar footer, defaults to OS preference, persisted in `localStorage`. Covers login screen, sidebar, bubbles, markdown, and the archived-sessions panel.
+- **Soft-delete safety net** — the sidebar ✕ now archives (`chat_session.archived`) instead of hard-deleting, with an "Archived" panel to restore or permanently purge. Added after a real incident: an instruction to "test the delete button on a test session" led to a user's actual conversation being hard-deleted, unrecoverable, because by that point no test sessions were left. Worth remembering as a reason for the safety net existing at all.
+- **iOS Safari auto-zoom fixed** — the chat input and sidebar rename input were `text-sm` (14px), under iOS's 16px auto-zoom-on-focus threshold; bumped to 16px below the `sm` breakpoint (unchanged 14px on desktop). Found via real iPhone 13 Pro Max testing.
+- **Dev workflow quirk worth remembering:** `docker-compose.yml` bind-mounts `./app` over the container's app directory (for live Python editing), which also shadows whatever the Docker image's multi-stage build baked into `app/static/`. So a frontend change needs `npm run build` run directly (from `webapp/`) to land in the bind-mounted `app/static/` — rebuilding the image alone won't update what the running dev container serves.
 
 ### Infrastructure
 - Docker Compose stack: Postgres 16 + pgvector, Redis, n8n, FastAPI app — all running (`docker-compose.yml`)

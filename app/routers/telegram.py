@@ -1,67 +1,19 @@
-import datetime as dt
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Request
 
-from app import history, ollama_client, redis_client
+from app import chat_service, chat_store, redis_client
 from app.config import settings
-from app.db import SessionLocal
-from app.models import InteractionLog
-from app.prompts import system_prompt
 from app.telegram_client import send_message
-from app.tools import TOOLS, make_executor
 
 logger = logging.getLogger("lifeos.telegram")
 
 router = APIRouter()
 
 
-def _log_interaction(direction: str, tokens: int | None) -> None:
-    with SessionLocal() as db:
-        db.add(
-            InteractionLog(
-                ts=dt.datetime.now(dt.timezone.utc),
-                direction=direction,
-                channel="telegram",
-                agent="chat",
-                tokens_local=tokens,
-                tokens_cloud=None,
-                redaction_applied="n/a (local-only)",
-            )
-        )
-        db.commit()
-
-
-def _build_system_prompt() -> str:
-    with SessionLocal() as db:
-        return system_prompt(db)
-
-
 async def _reply_with_ollama(chat_id: int, text: str) -> None:
-    past_turns = await history.get_history(chat_id)
-    messages = (
-        [{"role": "system", "content": _build_system_prompt()}]
-        + past_turns
-        + [{"role": "user", "content": text}]
-    )
-
-    try:
-        result = await ollama_client.chat_with_tools(
-            settings.ollama_model, messages, TOOLS, make_executor(chat_id)
-        )
-        reply = result["content"].strip()
-        _log_interaction("in", result["prompt_tokens"])
-        _log_interaction("out", result["completion_tokens"])
-    except Exception:
-        logger.exception("Ollama call failed")
-        reply = "Sorry, the local model didn't respond — check the Ollama connection."
-        _log_interaction("in", None)
-
-    if not reply:
-        logger.warning("Model returned an empty reply for message: %r", text)
-        reply = "Sorry, I didn't get a usable response that time — try rephrasing?"
-
-    await history.append_history(chat_id, text, reply)
+    session = chat_store.get_or_create_telegram_session()
+    reply = await chat_service.run_turn(session.id, chat_id, "telegram", text)
     try:
         await send_message(chat_id, reply)
     except Exception:
@@ -69,7 +21,8 @@ async def _reply_with_ollama(chat_id: int, text: str) -> None:
 
 
 async def _handle_reset(chat_id: int) -> None:
-    await history.clear_history(chat_id)
+    session = chat_store.get_or_create_telegram_session()
+    chat_store.clear_session_messages(session.id)
     await send_message(chat_id, "Conversation reset.")
 
 
