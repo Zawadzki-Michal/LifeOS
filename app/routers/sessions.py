@@ -83,11 +83,11 @@ def _get_web_session_or_404(session_id: int):
     return session
 
 
-async def _send_text(session_id: int, session, text: str) -> str:
+async def _send_text(session_id: int, session, text: str, terse: bool = False) -> str:
     if session.title is None:
         preview = text if len(text) <= TITLE_PREVIEW_LEN else text[: TITLE_PREVIEW_LEN - 1] + "…"
         chat_store.update_session(session_id, title=preview)
-    return await chat_service.run_turn(session_id, session_id, "web", text)
+    return await chat_service.run_turn(session_id, session_id, "web", text, terse=terse)
 
 
 @router.post("/{session_id}/messages")
@@ -115,5 +115,5 @@ async def send_voice_message(session_id: int, file: UploadFile = File(...)):
     if not transcript:
         raise HTTPException(status_code=400, detail="Couldn't make out any speech in that recording")
 
-    reply = await _send_text(session_id, session, transcript)
+    reply = await _send_text(session_id, session, transcript, terse=True)
     return {"transcript": transcript, "reply": reply}

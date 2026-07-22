@@ -35,12 +35,14 @@ def _log_interaction(channel: str, direction: str, tokens: int | None) -> None:
         db.commit()
 
 
-def _build_system_prompt(channel: str) -> str:
+def _build_system_prompt(channel: str, terse: bool) -> str:
     with SessionLocal() as db:
-        return system_prompt(db, channel)
+        return system_prompt(db, channel, terse=terse)
 
 
-async def run_turn(session_id: int, context_id: int | str, channel: str, text: str) -> str:
+async def run_turn(
+    session_id: int, context_id: int | str, channel: str, text: str, terse: bool = False
+) -> str:
     """Run one chat turn and return the reply text.
 
     `session_id` is the chat_session this turn's history is read from and
@@ -52,7 +54,7 @@ async def run_turn(session_id: int, context_id: int | str, channel: str, text: s
     """
     past_turns = chat_store.get_recent_messages(session_id)
     messages = (
-        [{"role": "system", "content": _build_system_prompt(channel)}]
+        [{"role": "system", "content": _build_system_prompt(channel, terse)}]
         + past_turns
         + [{"role": "user", "content": text}]
     )

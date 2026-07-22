@@ -11,6 +11,27 @@ export function canSpeak() {
   return "speechSynthesis" in window;
 }
 
+// Tiny pub-sub so any component (the stop button, a "speaking" indicator)
+// can react to playback state without prop-drilling through every place
+// that calls speak() — the reply bubble replay button and the voice-message
+// auto-play in App.jsx both trigger speech independently.
+const speakingListeners = new Set();
+let speaking = false;
+
+function setSpeaking(value) {
+  speaking = value;
+  speakingListeners.forEach((cb) => cb(speaking));
+}
+
+export function isSpeaking() {
+  return speaking;
+}
+
+export function onSpeakingChange(callback) {
+  speakingListeners.add(callback);
+  return () => speakingListeners.delete(callback);
+}
+
 function getVoices() {
   return new Promise((resolve) => {
     const existing = window.speechSynthesis.getVoices();
@@ -33,6 +54,9 @@ export async function speak(text) {
 
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "pl-PL";
+  utterance.onstart = () => setSpeaking(true);
+  utterance.onend = () => setSpeaking(false);
+  utterance.onerror = () => setSpeaking(false);
 
   const voices = await getVoices();
   const plVoice =
@@ -43,5 +67,7 @@ export async function speak(text) {
 }
 
 export function stopSpeaking() {
-  if (canSpeak()) window.speechSynthesis.cancel();
+  if (!canSpeak()) return;
+  window.speechSynthesis.cancel(); // doesn't reliably fire onend in every browser
+  setSpeaking(false);
 }

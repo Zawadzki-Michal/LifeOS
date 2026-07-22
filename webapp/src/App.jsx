@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api.js";
-import { speak } from "./tts.js";
+import { isSpeaking, onSpeakingChange, speak, stopSpeaking } from "./tts.js";
 import LoginScreen from "./components/LoginScreen.jsx";
 import Sidebar from "./components/Sidebar.jsx";
 import ChatThread from "./components/ChatThread.jsx";
@@ -20,6 +20,9 @@ export default function App() {
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [archivedSessions, setArchivedSessions] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [speaking, setSpeakingState] = useState(isSpeaking);
+
+  useEffect(() => onSpeakingChange(setSpeakingState), []);
   const [theme, setTheme] = useState(() => {
     const stored = localStorage.getItem("lifeos-theme");
     if (stored) return stored;
@@ -218,6 +221,16 @@ export default function App() {
           </div>
         )}
         <ChatThread messages={messages} pending={pending} />
+        {speaking && (
+          <div className="flex justify-center bg-white pt-2 dark:bg-slate-950">
+            <button
+              onClick={stopSpeaking}
+              className="mb-1 flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              <span aria-hidden="true">⏹</span> Stop reading
+            </button>
+          </div>
+        )}
         <ChatInput onSend={handleSend} onSendVoice={handleSendVoice} disabled={pending} />
       </div>
       {archivedOpen && (
