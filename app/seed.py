@@ -3,6 +3,7 @@ import datetime as dt
 from sqlalchemy.orm import Session
 
 from app.models import (
+    ExpenseCategory,
     Goal,
     GoalProgress,
     HouseholdMember,
@@ -11,6 +12,23 @@ from app.models import (
     User,
     UserFact,
 )
+
+EXPENSE_CATEGORIES = [
+    "transportation",
+    "fuel",
+    "groceries",
+    "subscriptions",
+    "bills",
+    "loans",
+    "mortgage",
+    "insurance",
+    "savings",
+    "kids",
+    "clothes",
+    "events",
+    "gadgets",
+    "other",
+]
 
 
 def _seed_user(db: Session) -> None:
@@ -125,6 +143,13 @@ def _seed_facts(db: Session) -> None:
     )
 
 
+def _seed_expense_categories(db: Session) -> None:
+    existing = {c.name for c in db.query(ExpenseCategory).all()}
+    db.add_all(
+        ExpenseCategory(name=name) for name in EXPENSE_CATEGORIES if name not in existing
+    )
+
+
 def _seed_places(db: Session) -> None:
     if db.query(SavedPlace).first() is not None:
         return
@@ -142,5 +167,6 @@ def seed_initial_data(db: Session) -> None:
     _seed_goals(db)
     _seed_metrics(db)
     _seed_facts(db)
+    _seed_expense_categories(db)
     _seed_places(db)
     db.commit()

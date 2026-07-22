@@ -149,6 +149,9 @@ class ExpenseCategory(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True)
     monthly_budget: Mapped[Numeric | None] = mapped_column(Numeric(12, 2))
+    # Last budget-threshold alert sent, as "YYYY-MM:pct" (e.g. "2026-07:100") —
+    # dedupes proactive alerts so each threshold only fires once per month.
+    last_budget_alert: Mapped[str | None] = mapped_column(String(16))
 
 
 class Expense(Base):
@@ -173,6 +176,10 @@ class Bill(Base):
     recurrence: Mapped[str] = mapped_column(String(16), default="monthly")  # monthly|yearly
     next_due: Mapped[dt.date] = mapped_column(Date)
     reminder_days_before: Mapped[int] = mapped_column(Integer, default=1)
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("expense_category.id"))
+    # False for bills whose amount varies each cycle (e.g. utilities) — these
+    # aren't auto-posted, they wait for a confirmed actual amount instead.
+    amount_is_fixed: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class SavingsBucket(Base):
