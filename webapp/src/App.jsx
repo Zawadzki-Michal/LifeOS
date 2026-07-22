@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api.js";
+import { speak } from "./tts.js";
 import LoginScreen from "./components/LoginScreen.jsx";
 import Sidebar from "./components/Sidebar.jsx";
 import ChatThread from "./components/ChatThread.jsx";
 import ChatInput from "./components/ChatInput.jsx";
 import ArchivedPanel from "./components/ArchivedPanel.jsx";
+
+const VOICE_PLACEHOLDER = "🎤 …";
 
 export default function App() {
   const [authState, setAuthState] = useState("checking"); // checking|authed|anon
@@ -90,6 +93,32 @@ export default function App() {
       setMessages(freshMessages);
     } catch (e) {
       setError(e.message);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function handleSendVoice(blob) {
+    setError(null);
+    setPending(true);
+    setMessages((prev) => [
+      ...prev,
+      { id: `local-${Date.now()}`, role: "user", content: VOICE_PLACEHOLDER },
+    ]);
+    try {
+      let sessionId = activeId;
+      if (sessionId == null) {
+        const created = await api.createSession();
+        sessionId = created.id;
+      }
+      const { reply } = await api.sendVoiceMessage(sessionId, blob);
+      const [freshMessages] = await Promise.all([api.listMessages(sessionId), refreshSessions()]);
+      setActiveId(sessionId);
+      setMessages(freshMessages);
+      speak(reply);
+    } catch (e) {
+      setError(e.message);
+      setMessages((prev) => prev.filter((m) => m.content !== VOICE_PLACEHOLDER));
     } finally {
       setPending(false);
     }
@@ -189,7 +218,7 @@ export default function App() {
           </div>
         )}
         <ChatThread messages={messages} pending={pending} />
-        <ChatInput onSend={handleSend} disabled={pending} />
+        <ChatInput onSend={handleSend} onSendVoice={handleSendVoice} disabled={pending} />
       </div>
       {archivedOpen && (
         <ArchivedPanel

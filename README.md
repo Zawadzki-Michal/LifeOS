@@ -95,6 +95,8 @@ A multi-session chat UI (React SPA) living alongside the Telegram bot — see [0
    For frontend UI iteration without touching the backend, `npm run dev` inside `webapp/` runs Vite's dev server on :5173 with API calls proxied to :8000 (start `docker compose up -d app` separately first). The full Google OAuth round trip only works against a redirect URI you actually registered, though — test that against :8000 or the real tunnel, not the :5173 dev server.
 6. Open `http://localhost:8000` (or your ngrok domain) and sign in.
 
+**Voice, both directions, web app only.** Hit the 🎤 button to record a voice message — it's transcribed locally (`faster-whisper`, no cloud call, same as the LLM itself) and sent as a normal message; replies to voice messages are read aloud automatically via the browser's built-in text-to-speech. Every assistant reply also gets a manual 🔊 button to replay it on demand. First recording after a fresh container start is slow (Whisper's model downloads and loads into memory on first use, cached after that). Telegram doesn't have voice yet — it'd need actual server-side audio generation instead of the browser doing it for free, a bigger separate piece.
+
 ## DB admin (Adminer)
 
 Full read/write access to every table, for when you want to check or fix something directly instead of going through the assistant — see 03-WEBAPP-PLAN.md for why (the model has fabricated at least one fake write confirmation; don't trust chat replies alone for anything that matters).

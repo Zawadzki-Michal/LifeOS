@@ -38,4 +38,24 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ text }),
     }),
+  sendVoiceMessage: async (id, blob) => {
+    const form = new FormData();
+    form.append("file", blob, "voice.webm");
+    // No Content-Type here — the browser sets the multipart boundary itself.
+    const res = await fetch(`${BASE}/sessions/${id}/voice-messages`, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
+    if (res.status === 401) {
+      const err = new Error("unauthorized");
+      err.status = 401;
+      throw err;
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Request failed: ${res.status}`);
+    }
+    return res.json();
+  },
 };
