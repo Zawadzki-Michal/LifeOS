@@ -119,3 +119,51 @@ def test_send_message_to_missing_session_404s(authed_client, monkeypatch):
     )
     resp = authed_client.post("/api/sessions/999999/messages", json={"text": "hi"})
     assert resp.status_code == 404
+
+
+def test_voice_message_transcribes_and_replies(authed_client, monkeypatch):
+    from app.routers import sessions as sessions_router
+
+    monkeypatch.setattr(
+        sessions_router.speech, "transcribe", AsyncMock(return_value="what's my schedule today")
+    )
+    monkeypatch.setattr(
+        sessions_router.chat_service, "run_turn", AsyncMock(return_value="Nothing on today.")
+    )
+
+    created = authed_client.post("/api/sessions", json={}).json()
+    resp = authed_client.post(
+        f"/api/sessions/{created['id']}/voice-messages",
+        files={"file": ("voice.webm", b"fake-audio-bytes", "audio/webm")},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"transcript": "what's my schedule today", "reply": "Nothing on today."}
+
+    # Voice messages auto-title the session too, same as text ones.
+    updated = authed_client.get("/api/sessions").json()[0]
+    assert updated["title"] == "what's my schedule today"
+
+
+def test_voice_message_with_no_discernible_speech_returns_400(authed_client, monkeypatch):
+    from app.routers import sessions as sessions_router
+
+    monkeypatch.setattr(sessions_router.speech, "transcribe", AsyncMock(return_value=""))
+
+    created = authed_client.post("/api/sessions", json={}).json()
+    resp = authed_client.post(
+        f"/api/sessions/{created['id']}/voice-messages",
+        files={"file": ("voice.webm", b"silence", "audio/webm")},
+    )
+    assert resp.status_code == 400
+
+
+def test_voice_message_to_missing_session_404s(authed_client, monkeypatch):
+    from app.routers import sessions as sessions_router
+
+    monkeypatch.setattr(sessions_router.speech, "transcribe", AsyncMock(return_value="hi"))
+    resp = authed_client.post(
+        "/api/sessions/999999/voice-messages",
+        files={"file": ("voice.webm", b"fake-audio-bytes", "audio/webm")},
+    )
+    assert resp.status_code == 404

@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+import tempfile
 
-from app import chat_service, chat_store
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+
+from app import chat_service, chat_store, speech
 from app.auth import require_auth
 
 router = APIRouter(prefix="/api/sessions", dependencies=[Depends(require_auth)])
@@ -74,20 +76,44 @@ def list_messages(session_id: int):
     return [_message_dict(m) for m in chat_store.list_all_messages(session_id)]
 
 
-@router.post("/{session_id}/messages")
-async def send_message(session_id: int, request: Request):
+def _get_web_session_or_404(session_id: int):
     session = chat_store.get_session(session_id, channel="web")
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+async def _send_text(session_id: int, session, text: str) -> str:
+    if session.title is None:
+        preview = text if len(text) <= TITLE_PREVIEW_LEN else text[: TITLE_PREVIEW_LEN - 1] + "…"
+        chat_store.update_session(session_id, title=preview)
+    return await chat_service.run_turn(session_id, session_id, "web", text)
+
+
+@router.post("/{session_id}/messages")
+async def send_message(session_id: int, request: Request):
+    session = _get_web_session_or_404(session_id)
 
     body = await _json_body(request)
     text = (body.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
 
-    if session.title is None:
-        preview = text if len(text) <= TITLE_PREVIEW_LEN else text[: TITLE_PREVIEW_LEN - 1] + "…"
-        chat_store.update_session(session_id, title=preview)
-
-    reply = await chat_service.run_turn(session_id, session_id, "web", text)
+    reply = await _send_text(session_id, session, text)
     return {"reply": reply}
+
+
+@router.post("/{session_id}/voice-messages")
+async def send_voice_message(session_id: int, file: UploadFile = File(...)):
+    session = _get_web_session_or_404(session_id)
+
+    with tempfile.NamedTemporaryFile(suffix=".audio") as tmp:
+        tmp.write(await file.read())
+        tmp.flush()
+        transcript = await speech.transcribe(tmp.name)
+
+    if not transcript:
+        raise HTTPException(status_code=400, detail="Couldn't make out any speech in that recording")
+
+    reply = await _send_text(session_id, session, transcript)
+    return {"transcript": transcript, "reply": reply}
