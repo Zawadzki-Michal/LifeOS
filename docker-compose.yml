@@ -55,6 +55,19 @@ services:
       postgres:
         condition: service_healthy
 
+  # DB admin UI for browsing/editing tables directly (see 03-WEBAPP-PLAN.md).
+  # Bound to localhost only — never routed through the ngrok tunnel, since
+  # Adminer has no auth of its own and raw SQL edit access is a bigger risk
+  # than the app itself. Reachable at http://localhost:8081 on this machine
+  # or over your home network; use Tailscale if you want it while out.
+  adminer:
+    image: adminer:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      - postgres
+
   # ngrok tunnel using a free reserved static domain — stable across
   # restarts (unlike Cloudflare's random Quick Tunnel URL).
   ngrok:

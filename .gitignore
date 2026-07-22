@@ -8,3 +8,5 @@ postgres_data/
 redis_data/
 *.log
 .DS_Store
+webapp/node_modules/
+app/static/
