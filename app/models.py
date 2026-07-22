@@ -246,6 +246,28 @@ class MetricDaily(Base):
     sleep_hours: Mapped[Numeric | None] = mapped_column(Numeric(4, 2))
     hrv: Mapped[int | None] = mapped_column(Integer)
     steps: Mapped[int | None] = mapped_column(Integer)
+    # Populated by Apple Health sync (app/health_client.py), not in original spec.
+    active_kcal: Mapped[Numeric | None] = mapped_column(Numeric(7, 2))
+    resting_kcal: Mapped[Numeric | None] = mapped_column(Numeric(7, 2))
+    avg_hr: Mapped[int | None] = mapped_column(Integer)
+
+
+class AppleWorkout(Base):
+    """Auto-detected Watch/Health workouts (a run, a swim) — distinct from the
+    manually-logged PPL sets in workout_session/set_log."""
+
+    __tablename__ = "apple_workout"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    external_id: Mapped[str] = mapped_column(String(200), unique=True)
+    workout_type: Mapped[str] = mapped_column(String(64))
+    start: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    end: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    duration_min: Mapped[Numeric | None] = mapped_column(Numeric(6, 2))
+    active_kcal: Mapped[Numeric | None] = mapped_column(Numeric(7, 2))
+    distance_km: Mapped[Numeric | None] = mapped_column(Numeric(6, 2))
+    avg_hr: Mapped[int | None] = mapped_column(Integer)
+    max_hr: Mapped[int | None] = mapped_column(Integer)
 
 
 # --- 7.8 Nutrition ---

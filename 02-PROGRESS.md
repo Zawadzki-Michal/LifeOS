@@ -1,7 +1,7 @@
 # LifeOS — Progress Log & Next Steps
 
 **Last updated:** 2026-07-22
-**Status:** Well ahead of the roadmap's Week 1 milestone on raw capability. Finance MCP is now fully live, and a first (partial) proactive-messaging mechanism exists — see Recommended Next Steps for what's still missing.
+**Status:** Well ahead of the roadmap's Week 1 milestone on raw capability. Finance MCP and Apple Health sync are both fully live, and the proactive scheduler now sends real morning/evening messages (health-aware) in addition to finance alerts — see Recommended Next Steps for what's still missing.
 
 This document is a running record of what's actually been built, as a supplement to `00-MASTER_SPEC.md` (the locked design) and `01-HANDOFF.md` (quick context). Update it as work lands — it's meant to answer "what's real right now" without having to read every commit.
 
@@ -32,12 +32,16 @@ This document is a running record of what's actually been built, as a supplement
   - **Recurring bills auto-post.** A bill is described once (name, amount, due day, category, recurrence); every time a finance tool runs, any bill whose due date has passed is logged as a real expense and rolled forward to the next cycle automatically — no manual re-entry.
   - **Variable-amount bills** (`amount_is_fixed=false`, e.g. utilities) don't auto-post a guessed number — they wait for `log_bill_payment` to confirm the actual amount, then roll forward.
   - Real data on file: Mortgage (2550 PLN/12th), YouTube Premium, iCloud+, Claude Subscription (all monthly subscriptions).
+- **Apple Health** (`app/health_client.py`, `app/routers/health_sync.py`): `POST /apple-health/sync` receives Health Auto Export's REST API JSON export (bearer-token gated — the endpoint is otherwise public through the ngrok tunnel like everything else), parses it into `metric_daily` (steps, active/resting kcal, sleep hours, resting HR, avg HR, HRV, weight) and `apple_workout` (type, duration, kcal, distance, avg/max HR, deduped by Apple's workout id). `get_health_summary(period)` tool mirrors `get_spending_summary` for on-demand "how was my week" questions.
+  - Live-verified against a real payload from the phone, including two real parser bugs found and fixed: `active_energy`/`basal_energy_burned` arrive in **kJ** (converted to kcal, respecting each metric's own declared `units` field — same conversion needed on the `activeEnergyBurned` workout field, initially missed there too), and `sleep_analysis`'s `totalSleep` arrives in **hours** already, not minutes.
+  - The app's REST API automation needs `step_count`, `resting_heart_rate`, `basal_energy_burned` explicitly added to its selected metrics, and a **separate** automation (different "Typ danych") for workouts — one automation only covers one data-type category.
+  - Also tested the app's alternate MCP server mode (`Server` tab, live pull instead of scheduled push) — works, but the server stops the instant the app is backgrounded, so it's only viable for on-demand foreground queries, not anything scheduled. Kept the webhook as the reliable always-on path; the MCP route is a possible future supplementary source, not wired in yet.
 
-### Proactive scheduler (`app/scheduler.py`) — first step toward the spec's core differentiator
-- A plain `asyncio` loop started from `main.py`'s lifespan (no new dependency — deliberately not n8n or APScheduler) sleeps until 08:00 Europe/Warsaw, runs daily finance checks, then repeats
-- Sends a Telegram reminder exactly `reminder_days_before` days ahead of a bill's due date; auto-posts fixed bills same as the on-demand path; nudges (daily, until resolved) for variable bills awaiting confirmation
-- Budget alerts: any category with a `monthly_budget` set gets a one-time Telegram alert per month at the 80% and 100% thresholds (deduped via `expense_category.last_budget_alert`)
-- **This is not yet the spec's morning brief / evening review** — it only carries finance checks so far. Extending it to compose and send the actual 06:45 brief / 21:00 review is the next step (see Recommended Next Steps).
+### Proactive scheduler (`app/scheduler.py`) — now sends real morning/evening messages
+- Three independent daily `asyncio` loops (no new dependency — deliberately not n8n or APScheduler), each sleeping until its own next occurrence in Europe/Warsaw: **07:00 morning motivation** (Qwen-composed, references yesterday's Health snapshot), **08:00 finance checks** (unchanged from before), **21:00 evening feedback** (Qwen-composed, references today's Health data as of the last sync)
+- Finance checks: Telegram reminder exactly `reminder_days_before` days ahead of a bill's due date; auto-posts fixed bills same as the on-demand path; nudges (daily, until resolved) for variable bills awaiting confirmation; budget alerts at 80%/100% thresholds (deduped via `expense_category.last_budget_alert`)
+- **Still not the full spec brief/review** — the morning/evening messages are health-aware but don't yet fold in calendar events, goals progress, or a structured 5-7 question evening review. See Recommended Next Steps.
+- **Telegram output is sanitized, not just prompted.** The model repeatedly ignored a "no Markdown" system-prompt instruction (kept generating `**bold**`/`#` headers, which Telegram displays as literal asterisks/hashes with no `parse_mode` set) — fixed by stripping Markdown syntax deterministically in `telegram_client.send_message` itself, the actual send boundary, rather than continuing to rely on prompt compliance.
 
 ### GitHub
 - Issue #17 (retroactive Week 1 tracking) and #5 (secrets policy) closed
@@ -80,6 +84,8 @@ Worth knowing about so nobody "fixes" these back by accident:
 - **No automated tests.** Every verification so far has been manual (direct API calls, live Telegram messages). Issue #4 (pytest + CI) is still open.
 - **Proactive messaging exists but is finance-only.** The spec's key differentiator (assistant messages first) is now real for bill reminders/budget alerts, but the actual morning brief (06:45) and evening review (21:00) from the spec still don't exist. See recommendation below.
 - **The LLM will confabulate a fake system limitation rather than admit a missing tool.** Caught it telling the user "the system doesn't allow deleting expense history" when the real issue was simply that no delete tool existed yet. Added an explicit prompt rule ("say so plainly, never claim a fake limitation") and the missing tools, but worth watching for the same pattern elsewhere as new capability gaps get hit.
+- **Third-party data export formats need real-payload verification, not just docs.** The Health Auto Export JSON schema docs showed generic examples that didn't match this account's actual units (kJ vs kcal, hours vs minutes for sleep) — both silently produced wildly wrong numbers (7164 kcal for one day) until checked against a real captured payload. Worth remembering for any future third-party integration: verify against a live sample, don't trust the reference docs' example values.
+- **Prompt-only instructions to the local model are not reliable enough for hard constraints.** Told it not to use Markdown (Telegram doesn't render it) directly in the system prompt — it ignored this twice in a row. Fixed by enforcing it in code instead (strip Markdown at the `send_message` boundary). General lesson: anything that must always hold should be enforced deterministically in code, not left to model compliance, even with explicit instructions.
 
 ---
 
@@ -87,8 +93,8 @@ Worth knowing about so nobody "fixes" these back by accident:
 
 In rough priority order, with reasoning:
 
-### 1. Extend `app/scheduler.py` into the real morning brief / evening review — highest leverage
-The daily loop, Telegram send, and per-day trigger already exist and are proven (finance reminders/alerts use them today) — what's missing is composing the actual 06:45 brief (calendar + goals + gym day + fixed monthly overhead) and 21:00 review (5-7 questions) and sending them from the same loop instead of just finance checks. This is now mostly composition work on top of an already-working trigger, not new infrastructure.
+### 1. Fold calendar + goals into the morning/evening messages — highest leverage
+The scheduler now sends real 07:00/21:00 messages, but they're health-data-only. What's left is composing the fuller spec brief (calendar events + active goals + fixed monthly overhead alongside the Health snapshot) and turning the evening message into the spec's actual 5-7 question structured review rather than a one-way status ping. The trigger, Telegram send, and persona composition are all already proven — this is composition work, not new infrastructure.
 
 ### 2. Semantic memory / fact-saving with confirmation
 Right now "remember X" tools (`update_saved_place`) write immediately with no review step — fine for places, riskier for arbitrary personal facts. The spec's `user_fact` table + confirm flow (§6.3, §8.7) would make the persona genuinely improve over time instead of only knowing what was manually seeded.
