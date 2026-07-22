@@ -13,6 +13,13 @@ os.environ.setdefault("REDIS_URL", "redis://redis:6379/1")
 os.environ.setdefault("TELEGRAM_ALLOWED_USER_ID", "424242")
 os.environ.setdefault("WEBAPP_SECRET_KEY", "test-secret-not-for-real-use")
 os.environ.setdefault("WEBAPP_ALLOWED_EMAILS", "test@example.com")
+# Fake but truthy — these just need to pass the "is it configured" guard in
+# maps_client/calendar_client so tests reach the (mocked) HTTP calls instead
+# of short-circuiting to "not connected yet".
+os.environ.setdefault("GOOGLE_MAPS_API_KEY", "test-maps-key")
+os.environ.setdefault("GOOGLE_CALENDAR_CLIENT_ID", "test-client-id")
+os.environ.setdefault("GOOGLE_CALENDAR_CLIENT_SECRET", "test-client-secret")
+os.environ.setdefault("GOOGLE_CALENDAR_REFRESH_TOKEN", "test-refresh-token")
 
 import pytest
 from fastapi import FastAPI
@@ -53,6 +60,24 @@ def _clean_tables():
     with engine.begin() as conn:
         table_names = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)
         conn.execute(text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE"))
+
+
+@pytest.fixture(autouse=True)
+async def _clean_redis():
+    # redis_client caches its async client at module level, bound to
+    # whichever event loop was running when it was first created. Since
+    # pytest-asyncio gives each test function its own event loop, a client
+    # created in an earlier test breaks ("attached to a different loop") if
+    # reused here — force a fresh one per test instead.
+    from app import redis_client
+
+    redis_client._client = None
+    yield
+    client = redis_client._client
+    if client is not None:
+        await client.flushdb()
+        await client.aclose()
+        redis_client._client = None
 
 
 @pytest.fixture()

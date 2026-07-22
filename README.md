@@ -38,7 +38,7 @@ Tests run against a dedicated `lifeos_test` database (created automatically on f
 docker compose run --rm app sh -c "pip install -r requirements-dev.txt && pytest -v"
 ```
 
-Covers `chat_service` (mocked Ollama), the `/api/sessions` endpoints end-to-end, finance tool logic (bill rollover/budget math — the kind of thing that's only ever been manually checked before), the tool-dispatch table in `tools.py`, and that `alembic upgrade head` actually runs cleanly against a brand-new database. Runs automatically on every push/PR via `.github/workflows/tests.yml`.
+Covers `chat_service` (mocked Ollama), the `/api/sessions` endpoints end-to-end, finance tool logic (bill rollover/budget math), the tool-dispatch table in `tools.py`, `alembic upgrade head` against a brand-new database, and — via `respx`-mocked HTTP — `calendar_client` and `maps_client` (both hit Google's real APIs) plus `health_client` (pure DB logic, no mocking needed). Runs automatically on every push/PR via `.github/workflows/tests.yml`.
 
 ## Telegram bot
 
