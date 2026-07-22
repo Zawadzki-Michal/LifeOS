@@ -30,8 +30,13 @@ TOOLS = [
         "function": {
             "name": "get_train_departures",
             "description": (
-                "Get the next several upcoming train departures (default 4) between "
-                "two Polish train stations, e.g. Bochnia and Kraków Główny."
+                "Get train departures between two Polish stations, e.g. Bochnia and "
+                "Kraków Główny. Defaults to departures from right now. Can also look up "
+                "trains departing around a specific future time ('trains tomorrow "
+                "around 3pm'), or — for 'what time do I need to leave to be there by "
+                "X' questions like getting to the office by 9am — trains arriving by a "
+                "specific time instead, which is the one that actually answers that "
+                "kind of question correctly."
             ),
             "parameters": {
                 "type": "object",
@@ -50,6 +55,27 @@ TOOLS = [
                     "count": {
                         "type": "integer",
                         "description": "How many upcoming departures to return. Defaults to 4.",
+                    },
+                    "departure_time_iso": {
+                        "type": "string",
+                        "description": (
+                            "Optional. Resolve a relative time like 'tomorrow around "
+                            "3pm' into an actual ISO 8601 datetime yourself (same as "
+                            "calendar events) using the current date/time given in "
+                            "your instructions. Omit entirely for 'right now'. Don't "
+                            "combine with arrival_time_iso — pick whichever matches "
+                            "the question."
+                        ),
+                    },
+                    "arrival_time_iso": {
+                        "type": "string",
+                        "description": (
+                            "Optional. Use this instead of departure_time_iso for "
+                            "'I need to be there by X' questions (e.g. an office event "
+                            "at 9am) — resolve the target arrival time into ISO 8601 "
+                            "yourself, same as calendar events, and this returns trains "
+                            "that get there by then."
+                        ),
                     },
                 },
                 "required": ["origin_station"],
@@ -500,6 +526,8 @@ def make_executor(chat_id: int):
                 args["origin_station"],
                 args.get("destination_station"),
                 args.get("count", 4),
+                args.get("departure_time_iso"),
+                args.get("arrival_time_iso"),
             )
         if name == "plan_train_commute":
             return await maps_client.plan_train_commute()

@@ -49,7 +49,7 @@ async def _reply_with_ollama(chat_id: int, text: str) -> None:
         result = await ollama_client.chat_with_tools(
             settings.ollama_model, messages, TOOLS, make_executor(chat_id)
         )
-        reply = result["content"]
+        reply = result["content"].strip()
         _log_interaction("in", result["prompt_tokens"])
         _log_interaction("out", result["completion_tokens"])
     except Exception:
@@ -57,8 +57,15 @@ async def _reply_with_ollama(chat_id: int, text: str) -> None:
         reply = "Sorry, the local model didn't respond — check the Ollama connection."
         _log_interaction("in", None)
 
+    if not reply:
+        logger.warning("Model returned an empty reply for message: %r", text)
+        reply = "Sorry, I didn't get a usable response that time — try rephrasing?"
+
     await history.append_history(chat_id, text, reply)
-    await send_message(chat_id, reply)
+    try:
+        await send_message(chat_id, reply)
+    except Exception:
+        logger.exception("Failed to send Telegram reply")
 
 
 async def _handle_reset(chat_id: int) -> None:

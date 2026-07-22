@@ -9,7 +9,7 @@ import datetime as dt
 import logging
 from zoneinfo import ZoneInfo
 
-from app import finance_client, health_client, ollama_client
+from app import calendar_client, finance_client, health_client, maps_client, ollama_client
 from app.config import settings
 from app.db import SessionLocal
 from app.prompts import system_prompt
@@ -48,11 +48,29 @@ async def run_daily_checks() -> None:
 
         messages += finance_client.check_budget_alerts(db)
 
+    messages += await health_client.check_sync_health()
+
     for msg in messages:
         try:
             await send_message(chat_id, msg)
         except Exception:
             logger.exception("Failed to send proactive finance message")
+
+
+async def _office_commute_note(target_date: dt.date) -> str | None:
+    """If an 'office'-titled event exists on target_date with a specific
+    time, computes the actual train needed to arrive on time (using the
+    established Bochnia<->Kraków commute) — 'what time do I need to leave'
+    isn't something the model reliably works out unprompted from a bare
+    event time, so it's computed deterministically here instead."""
+    events = await calendar_client.fetch_day_events(target_date, ["primary", "family"])
+    for title, _, start_dt in events:
+        if start_dt is not None and "office" in title.lower():
+            trains = await maps_client.get_train_departures(
+                "Bochnia", "Kraków Główny", count=3, arrival_time_iso=start_dt.isoformat()
+            )
+            return f"Commute options for '{title}' at {start_dt.strftime('%H:%M')}: {trains}"
+    return None
 
 
 async def _send_composed_message(context: str, instruction: str) -> None:
@@ -72,27 +90,78 @@ async def _send_composed_message(context: str, instruction: str) -> None:
 
 
 async def send_morning_motivation() -> None:
-    yesterday = dt.date.today() - dt.timedelta(days=1)
+    today = dt.date.today()
+    yesterday = today - dt.timedelta(days=1)
     snapshot = await health_client.get_daily_snapshot(yesterday)
-    context = f"Yesterday's activity: {snapshot}." if snapshot else "No Apple Health data synced yet."
+    today_events = await calendar_client.list_today_events()
+    goal_progress = await health_client.get_workout_goal_progress()
+    latest_weight = await health_client.get_latest_weight()
+    commute = await _office_commute_note(today)
+
+    parts = [f"Yesterday's activity: {snapshot}." if snapshot else "No Apple Health data synced yet."]
+    parts.append(f"Calendar: {today_events}")
+    if commute:
+        parts.append(commute)
+    if goal_progress:
+        parts.append(f"Goal progress this week: {goal_progress}.")
+    if latest_weight:
+        parts.append(f"Latest weight: {latest_weight}.")
+
     await _send_composed_message(
-        context,
-        "Write a short (2-3 sentence) motivating good-morning message for today, in "
-        "your usual tone. Reference yesterday's activity if there's data, otherwise "
-        "just motivate for today without mentioning missing data.",
+        " ".join(parts),
+        "Write a short (3-4 sentence) motivating good-morning message for today, in "
+        "your usual tone. Reference yesterday's activity if there's data (otherwise "
+        "just motivate for today without mentioning missing data), give a brief "
+        "heads-up on anything on today's calendar, and reference goal progress or "
+        "weight only if given above — don't invent numbers. Each calendar item is "
+        "already labeled '(upcoming)' or '(already started/passed)' — respect that "
+        "label exactly: for anything marked already started/passed, ask whether it "
+        "happened rather than reminding him to go do it as if it were still ahead. If "
+        "a commute note is given above, list all the train options given so he can "
+        "pick which fits his morning — don't just pick one for him, and don't invent "
+        "times not given to you.",
     )
 
 
 async def send_evening_feedback() -> None:
     today = dt.date.today()
+    tomorrow_date = today + dt.timedelta(days=1)
     snapshot = await health_client.get_daily_snapshot(today)
-    if snapshot is None:
+    spending = await finance_client.get_spending_summary("today")
+    tomorrow = await calendar_client.list_tomorrow_events()
+    goal_progress = await health_client.get_workout_goal_progress()
+    latest_weight = await health_client.get_latest_weight()
+    commute = await _office_commute_note(tomorrow_date)
+
+    nothing_to_report = (
+        snapshot is None
+        and spending.startswith("No expenses logged")
+        and tomorrow == "Nothing on the calendar tomorrow."
+    )
+    if nothing_to_report:
         return
+
+    activity_line = f"Today's activity so far: {snapshot}." if snapshot else "No Health data synced today."
+    parts = [activity_line, f"Spending today: {spending}", f"Calendar: {tomorrow}"]
+    if commute:
+        parts.append(commute)
+    if goal_progress:
+        parts.append(f"Goal progress this week: {goal_progress}.")
+    if latest_weight:
+        parts.append(f"Latest weight: {latest_weight}.")
+
     await _send_composed_message(
-        f"Today's activity so far (as of the last Health sync): {snapshot}.",
-        "Write a short (2-3 sentence) end-of-day feedback message in your usual tone "
-        "— acknowledge what got done today, and nudge on anything short of an active "
-        "goal's target if relevant.",
+        " ".join(parts),
+        "Write a short (3-5 sentence) end-of-day wrap-up in your usual tone. Cover: "
+        "what happened today activity-wise, whether any expenses were logged today "
+        "(say so plainly if none were — don't just skip it), and a brief heads-up on "
+        "anything scheduled tomorrow (e.g. remind him to pack gym clothes or prep for "
+        "a study session if relevant to what's listed). If a commute note is given "
+        "above, list all the train options given so he can pick which fits his "
+        "morning — don't just pick one for him, and don't invent times not given to "
+        "you. If goal progress or weight is given above, use the real numbers to make the "
+        "nudge specific instead of generic. Do not invent events, expenses, goal "
+        "counts, weight, or train times that weren't given to you above.",
     )
 
 

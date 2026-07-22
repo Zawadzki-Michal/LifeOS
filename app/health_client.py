@@ -8,11 +8,14 @@ import re
 from zoneinfo import ZoneInfo
 
 from app.db import SessionLocal
-from app.models import AppleWorkout, MetricDaily
+from app.models import AppleWorkout, Goal, MetricDaily
 
 logger = logging.getLogger("lifeos.health")
 
 TZ = ZoneInfo("Europe/Warsaw")
+
+_GYM_KEYWORDS = ("strength", "silow", "functional", "gym", "hiit", "cross")
+_SQUASH_KEYWORDS = ("squash",)
 
 _TS_RE = re.compile(
     r"^(?P<date>\d{4}-\d{2}-\d{2})[ T](?P<time>\d{2}:\d{2}:\d{2})\s*"
@@ -269,3 +272,72 @@ async def get_daily_snapshot(date: dt.date) -> str | None:
         parts.append(", ".join(w.workout_type for w in workouts) + " workout")
 
     return ", ".join(parts) if parts else None
+
+
+async def get_workout_goal_progress() -> str | None:
+    """Cross-references this week's synced workouts against the Gym/Squash
+    frequency goals, so the scheduler can nudge with real numbers ('1/3 squash
+    sessions this week') instead of generic 'move more' advice. Wife-time and
+    Kids-activity goals aren't covered here — those track family_event, which
+    nothing logs into yet, not Apple Health workouts."""
+    week_start, _ = _period_start_date("week")
+    start_utc = dt.datetime.combine(week_start, dt.time.min, tzinfo=TZ).astimezone(dt.timezone.utc)
+
+    with SessionLocal() as db:
+        goals = (
+            db.query(Goal)
+            .filter(Goal.kind == "frequency", Goal.status == "active")
+            .all()
+        )
+        workouts = db.query(AppleWorkout).filter(AppleWorkout.start >= start_utc).all()
+
+    if not goals:
+        return None
+
+    gym_count = sum(1 for w in workouts if any(k in w.workout_type.lower() for k in _GYM_KEYWORDS))
+    squash_count = sum(1 for w in workouts if any(k in w.workout_type.lower() for k in _SQUASH_KEYWORDS))
+
+    lines = []
+    for g in goals:
+        title_lower = g.title.lower()
+        if "squash" in title_lower:
+            lines.append(f"{g.title}: {squash_count} this week (target {g.target_value})")
+        elif "gym" in title_lower:
+            lines.append(f"{g.title}: {gym_count} this week (target {g.target_value})")
+
+    return "; ".join(lines) if lines else None
+
+
+async def get_latest_weight() -> str | None:
+    """Most recent synced weight reading, for referencing against the weight
+    goal — Apple Health sync populates metric_daily.weight_kg once 'Weight'
+    is added to the app's selected metrics."""
+    with SessionLocal() as db:
+        row = (
+            db.query(MetricDaily)
+            .filter(MetricDaily.weight_kg.isnot(None))
+            .order_by(MetricDaily.date.desc())
+            .first()
+        )
+    if row is None:
+        return None
+    return f"{float(row.weight_kg):.1f} kg (as of {row.date.isoformat()})"
+
+
+async def check_sync_health() -> list[str]:
+    """Returns a warning if Health data hasn't synced in a while — otherwise
+    a broken automation (expired token, iOS killing background refresh) would
+    go unnoticed indefinitely."""
+    with SessionLocal() as db:
+        latest = db.query(MetricDaily).order_by(MetricDaily.date.desc()).first()
+
+    if latest is None:
+        return []
+
+    gap_days = (dt.date.today() - latest.date).days
+    if gap_days >= 2:
+        return [
+            f"Heads up — no Apple Health data has synced since {latest.date.isoformat()} "
+            f"({gap_days} days ago). Worth checking the Health Auto Export automation on your phone."
+        ]
+    return []
