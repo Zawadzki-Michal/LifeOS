@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.markdown-body p {
+  margin-bottom: 0.5rem;
+}
+.markdown-body p:last-child {
+  margin-bottom: 0;
+}
+.markdown-body ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.markdown-body ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.markdown-body strong {
+  font-weight: 600;
+}
+.markdown-body code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
+  font-size: 0.85em;
+}
+.markdown-body pre {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin-bottom: 0.5rem;
+}
+.markdown-body pre code {
+  background: none;
+  padding: 0;
+}
+
+.dark .markdown-body code {
+  background: rgba(255, 255, 255, 0.1);
+}
+.dark .markdown-body pre {
+  background: rgba(255, 255, 255, 0.08);
+}
+.dark .markdown-body pre code {
+  background: none;
+}
