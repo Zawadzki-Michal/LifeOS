@@ -34,6 +34,6 @@ variable "image_repository" {
 
 variable "monitoring_enabled" {
   type        = bool
-  default     = false
-  description = "Set true only once the kube-prometheus-stack release is healthy AND the grafana-lifeos-pg Secret + grafana_ro Postgres role exist in the monitoring namespace (deploy/README.md Phase 4) — otherwise the app pod and Grafana both fail to come up."
+  default     = true
+  description = "True by default since 2026-07-24 — kube-prometheus-stack is healthy and grafana-lifeos-pg/grafana_ro exist on the Oracle cluster now. Override to false only if standing up a fresh cluster from scratch before those prerequisites are in place."
 }

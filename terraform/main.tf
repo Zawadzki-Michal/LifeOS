@@ -52,24 +52,14 @@ resource "helm_release" "lifeos" {
     value = "IfNotPresent"
   }
 
-  # NOTE: monitoring.enabled is true in values.yaml by default, which
-  # requires the kube-prometheus-stack release below (for the ServiceMonitor
-  # CRD) to exist first, AND requires the grafana-lifeos-pg Secret +
-  # grafana_ro Postgres role to already exist in the monitoring namespace
-  # (created once by hand, same pattern as lifeos-secrets — see
-  # deploy/README.md's Phase 4 section). Until both of those are done on
-  # this cluster, override with `-var monitoring_enabled=false` or the
-  # kube-prometheus-stack release + lifeos app pod will fail to come up.
   set {
     name  = "monitoring.enabled"
     value = var.monitoring_enabled
   }
 
-  # Deliberately NOT depends_on kube_prometheus_stack: monitoring_enabled
-  # defaults false precisely so this release doesn't need that one to
-  # succeed first. Add the dependency back once monitoring_enabled flips to
-  # true for good (the ServiceMonitor CRD must exist by then regardless).
-  depends_on = [helm_release.cert_manager_config]
+  # kube-prometheus-stack's ServiceMonitor CRD must exist before this
+  # release's app-servicemonitor.yaml template can apply.
+  depends_on = [helm_release.cert_manager_config, helm_release.kube_prometheus_stack]
 }
 
 resource "helm_release" "kube_prometheus_stack" {
@@ -84,11 +74,7 @@ resource "helm_release" "kube_prometheus_stack" {
     file("${path.module}/../deploy/kube-prometheus-stack-values-oracle.yaml"),
   ]
 
-  # Grafana's grafana-lifeos-pg Secret + the grafana_ro Postgres role don't
-  # exist on this cluster yet (created once by hand, same pattern as
-  # lifeos-secrets — see deploy/README.md's Phase 4 section) — until they
-  # do, Grafana crash-loops waiting on that secretKeyRef. wait = false so
-  # that doesn't fail the whole apply; flip back to the default (true) once
-  # the prerequisite is set up here too.
-  wait = false
+  # grafana-lifeos-pg Secret + grafana_ro Postgres role created by hand on
+  # 2026-07-24 (see deploy/README.md Phase 4) — Grafana is healthy now, so
+  # this waits for real again instead of silently succeeding broken.
 }
