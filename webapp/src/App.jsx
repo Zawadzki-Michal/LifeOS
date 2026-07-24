@@ -9,6 +9,7 @@ import ChatThread from "./components/ChatThread.jsx";
 import ChatInput from "./components/ChatInput.jsx";
 import ArchivedPanel from "./components/ArchivedPanel.jsx";
 import UsagePanel from "./components/UsagePanel.jsx";
+import StatsPanel from "./components/StatsPanel.jsx";
 import ModelPicker from "./components/ModelPicker.jsx";
 
 const VOICE_PLACEHOLDER = "🎤 …";
@@ -26,6 +27,7 @@ export default function App() {
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [archivedSessions, setArchivedSessions] = useState([]);
   const [usageOpen, setUsageOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [usageData, setUsageData] = useState(null);
   const [usageLoading, setUsageLoading] = useState(false);
   const [usageError, setUsageError] = useState(null);
@@ -310,6 +312,7 @@ export default function App() {
           onLogout={handleLogout}
           onShowArchived={handleShowArchived}
           onShowUsage={handleShowUsage}
+          onShowStats={() => setStatsOpen(true)}
           userEmail={userEmail}
         />
       </div>
@@ -379,6 +382,7 @@ export default function App() {
           onClose={() => setUsageOpen(false)}
         />
       )}
+      {statsOpen && <StatsPanel onClose={() => setStatsOpen(false)} />}
     </div>
   );
 }

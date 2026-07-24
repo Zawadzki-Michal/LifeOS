@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, BarChart3, CalendarDays, LogOut, MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  Archive,
+  BarChart3,
+  CalendarDays,
+  LayoutDashboard,
+  LogOut,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 
 function formatTime(iso) {
   const d = new Date(iso);
@@ -48,6 +58,7 @@ export default function Sidebar({
   onLogout,
   onShowArchived,
   onShowUsage,
+  onShowStats,
   userEmail,
 }) {
   const [editingId, setEditingId] = useState(null);
@@ -202,6 +213,14 @@ export default function Sidebar({
             className="rounded-lg p-2 text-muted hover:bg-raised hover:text-ink"
           >
             <BarChart3 size={17} />
+          </button>
+          <button
+            onClick={onShowStats}
+            title="Stats"
+            aria-label="Stats dashboards"
+            className="rounded-lg p-2 text-muted hover:bg-raised hover:text-ink"
+          >
+            <LayoutDashboard size={17} />
           </button>
         </div>
       </div>
