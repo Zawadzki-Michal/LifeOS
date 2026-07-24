@@ -28,6 +28,7 @@ from sqlalchemy import create_engine, text
 
 from app.auth import SESSION_COOKIE, create_session_token
 from app.db import Base, engine
+from app.routers import app_settings as app_settings_router
 from app.routers import auth as auth_router
 from app.routers import sessions as sessions_router
 from app.routers import usage as usage_router
@@ -90,6 +91,7 @@ def api_app() -> FastAPI:
     app.include_router(auth_router.router)
     app.include_router(sessions_router.router)
     app.include_router(usage_router.router)
+    app.include_router(app_settings_router.router)
     return app
 
 

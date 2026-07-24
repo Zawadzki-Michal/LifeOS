@@ -2,13 +2,19 @@ from unittest.mock import AsyncMock
 
 from app import chat_service, chat_store, tools
 from app.db import SessionLocal
-from app.models import InteractionLog, User
+from app.models import HouseholdMember, InteractionLog, User
 from app.ollama_client import TerminalToolResult
 
 
 def _make_session(channel="web") -> int:
     s = chat_store.create_session(channel)
     return s.id
+
+
+# --- Local path (explicit "Local:" prefix) ---------------------------------
+# All of these prefix the message with "Local:" to route through the local
+# tool-calling model — see test_run_turn_skips_local_model_by_default below
+# for what happens without it.
 
 
 async def test_run_turn_persists_user_and_assistant_messages(monkeypatch):
@@ -18,7 +24,7 @@ async def test_run_turn_persists_user_and_assistant_messages(monkeypatch):
     monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", mock_chat)
 
     session_id = _make_session()
-    reply = await chat_service.run_turn(session_id, session_id, "web", "hello")
+    reply = await chat_service.run_turn(session_id, session_id, "web", "Local: hello")
 
     assert reply == "Hi there!"
     messages = chat_store.get_recent_messages(session_id)
@@ -45,7 +51,7 @@ async def test_run_turn_persists_real_tool_calls_as_audit_trail(monkeypatch):
     )
 
     session_id = _make_session()
-    await chat_service.run_turn(session_id, session_id, "web", "how active was I this week?")
+    await chat_service.run_turn(session_id, session_id, "web", "Local: how active was I this week?")
 
     messages = chat_store.list_all_messages(session_id)
     assistant_msg = next(m for m in messages if m.role == "assistant")
@@ -61,7 +67,7 @@ async def test_run_turn_persists_no_tool_calls_when_none_were_made(monkeypatch):
     monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", mock_chat)
 
     session_id = _make_session()
-    await chat_service.run_turn(session_id, session_id, "web", "hi")
+    await chat_service.run_turn(session_id, session_id, "web", "Local: hi")
 
     messages = chat_store.list_all_messages(session_id)
     assistant_msg = next(m for m in messages if m.role == "assistant")
@@ -75,7 +81,7 @@ async def test_run_turn_logs_interaction_with_channel(monkeypatch):
     monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", mock_chat)
 
     session_id = _make_session()
-    await chat_service.run_turn(session_id, session_id, "telegram", "hi")
+    await chat_service.run_turn(session_id, session_id, "telegram", "Local: hi")
 
     with SessionLocal() as db:
         logs = db.query(InteractionLog).order_by(InteractionLog.id).all()
@@ -90,7 +96,7 @@ async def test_run_turn_falls_back_on_empty_reply(monkeypatch):
     monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", mock_chat)
 
     session_id = _make_session()
-    reply = await chat_service.run_turn(session_id, session_id, "web", "hello")
+    reply = await chat_service.run_turn(session_id, session_id, "web", "Local: hello")
 
     assert reply == chat_service.FALLBACK_REPLY
     messages = chat_store.get_recent_messages(session_id)
@@ -102,7 +108,7 @@ async def test_run_turn_falls_back_on_ollama_exception(monkeypatch):
     monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", mock_chat)
 
     session_id = _make_session()
-    reply = await chat_service.run_turn(session_id, session_id, "web", "hello")
+    reply = await chat_service.run_turn(session_id, session_id, "web", "Local: hello")
 
     assert reply == chat_service.ERROR_REPLY
 
@@ -121,10 +127,10 @@ async def test_run_turn_feeds_prior_history_back_into_next_call(monkeypatch):
     monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", mock_chat)
 
     session_id = _make_session()
-    await chat_service.run_turn(session_id, session_id, "web", "first message")
+    await chat_service.run_turn(session_id, session_id, "web", "Local: first message")
 
     mock_chat.return_value = {"content": "second reply", "prompt_tokens": 1, "completion_tokens": 1}
-    await chat_service.run_turn(session_id, session_id, "web", "second message")
+    await chat_service.run_turn(session_id, session_id, "web", "Local: second message")
 
     sent_messages = mock_chat.await_args.args[1]  # (model, messages, tools, executor)
     contents = [m["content"] for m in sent_messages]
@@ -145,7 +151,7 @@ async def test_run_turn_records_cloud_usage_when_consult_tool_invoked(monkeypatc
     )
 
     session_id = _make_session()
-    reply = await chat_service.run_turn(session_id, session_id, "web", "advise me")
+    reply = await chat_service.run_turn(session_id, session_id, "web", "Local: advise me")
 
     assert reply == "cloud advice"
     with SessionLocal() as db:
@@ -172,7 +178,7 @@ async def test_run_turn_persists_cloud_tokens_not_local_tokens_on_terminal_path(
     )
 
     session_id = _make_session()
-    await chat_service.run_turn(session_id, session_id, "web", "advise me")
+    await chat_service.run_turn(session_id, session_id, "web", "Local: advise me")
 
     with SessionLocal() as db:
         from app.models import ChatMessage
@@ -192,7 +198,7 @@ async def test_run_turn_tags_reply_with_local_model_when_no_cloud_used(monkeypat
     monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", mock_chat)
 
     session_id = _make_session()
-    await chat_service.run_turn(session_id, session_id, "web", "hi")
+    await chat_service.run_turn(session_id, session_id, "web", "Local: hi")
 
     messages = chat_store.list_all_messages(session_id)
     assistant_msg = next(m for m in messages if m.role == "assistant")
@@ -211,7 +217,7 @@ async def test_run_turn_tags_reply_with_cloud_model_on_terminal_path(monkeypatch
     )
 
     session_id = _make_session()
-    await chat_service.run_turn(session_id, session_id, "web", "advise me")
+    await chat_service.run_turn(session_id, session_id, "web", "Local: advise me")
 
     messages = chat_store.list_all_messages(session_id)
     assistant_msg = next(m for m in messages if m.role == "assistant")
@@ -223,7 +229,7 @@ async def test_run_turn_leaves_model_none_on_ollama_exception(monkeypatch):
     monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", mock_chat)
 
     session_id = _make_session()
-    await chat_service.run_turn(session_id, session_id, "web", "hi")
+    await chat_service.run_turn(session_id, session_id, "web", "Local: hi")
 
     messages = chat_store.list_all_messages(session_id)
     assistant_msg = next(m for m in messages if m.role == "assistant")
@@ -243,7 +249,7 @@ async def test_run_turn_publishes_thinking_local_status_for_web_channel(monkeypa
     monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", mock_chat)
 
     session_id = _make_session("web")
-    await chat_service.run_turn(session_id, session_id, "web", "hi")
+    await chat_service.run_turn(session_id, session_id, "web", "Local: hi")
 
     assert (session_id, "thinking_local") in published
 
@@ -257,7 +263,7 @@ async def test_run_turn_does_not_publish_status_for_telegram_channel(monkeypatch
     monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", mock_chat)
 
     session_id = _make_session("telegram")
-    await chat_service.run_turn(session_id, session_id, "telegram", "hi")
+    await chat_service.run_turn(session_id, session_id, "telegram", "Local: hi")
 
     status_mock.assert_not_awaited()
 
@@ -283,7 +289,7 @@ async def test_run_turn_publishes_thinking_cloud_status_around_consult_tool(monk
     monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", fake_chat_with_tools)
 
     session_id = _make_session("web")
-    await chat_service.run_turn(session_id, session_id, "web", "advise me")
+    await chat_service.run_turn(session_id, session_id, "web", "Local: advise me")
 
     assert (session_id, "thinking_cloud") in published
 
@@ -295,7 +301,7 @@ async def test_run_turn_marks_redaction_not_applied_when_only_local_used(monkeyp
     monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", mock_chat)
 
     session_id = _make_session()
-    await chat_service.run_turn(session_id, session_id, "web", "hi")
+    await chat_service.run_turn(session_id, session_id, "web", "Local: hi")
 
     with SessionLocal() as db:
         logs = db.query(InteractionLog).order_by(InteractionLog.id).all()
@@ -319,9 +325,206 @@ async def test_run_turn_uses_channel_aware_system_prompt(monkeypatch):
     monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", fake_chat_with_tools)
 
     web_session = _make_session("web")
-    await chat_service.run_turn(web_session, web_session, "web", "hi")
+    await chat_service.run_turn(web_session, web_session, "web", "Local: hi")
     assert "renders Markdown" in captured["system"]
 
     telegram_session = _make_session("telegram")
-    await chat_service.run_turn(telegram_session, telegram_session, "telegram", "hi")
+    await chat_service.run_turn(telegram_session, telegram_session, "telegram", "Local: hi")
     assert "plain text only" in captured["system"]
+
+
+async def test_run_turn_local_prefix_is_case_insensitive_and_stripped(monkeypatch):
+    mock_chat = AsyncMock(
+        return_value={"content": "ok", "prompt_tokens": 1, "completion_tokens": 1}
+    )
+    monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", mock_chat)
+
+    session_id = _make_session()
+    await chat_service.run_turn(session_id, session_id, "web", "  LOCAL:   log 20 PLN coffee")
+
+    mock_chat.assert_awaited_once()
+    messages = chat_store.get_recent_messages(session_id)
+    assert messages[0] == {"role": "user", "content": "log 20 PLN coffee"}
+
+
+# --- Default path (no "Local:" prefix — skips straight to the cloud) -------
+
+
+async def test_run_turn_skips_local_model_by_default(monkeypatch):
+    mock_local = AsyncMock()
+    monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", mock_local)
+    mock_cloud = AsyncMock(
+        return_value={"content": "cloud reply", "prompt_tokens": 30, "completion_tokens": 12}
+    )
+    monkeypatch.setattr(chat_service.openrouter_client, "chat", mock_cloud)
+
+    session_id = _make_session()
+    reply = await chat_service.run_turn(session_id, session_id, "web", "what's a good breakfast?")
+
+    assert reply == "cloud reply"
+    mock_local.assert_not_awaited()
+    mock_cloud.assert_awaited_once()
+
+    messages = chat_store.list_all_messages(session_id)
+    assistant_msg = next(m for m in messages if m.role == "assistant")
+    assert assistant_msg.model == chat_service.settings.openrouter_model
+    assert assistant_msg.tokens == 12
+
+
+async def test_run_turn_redacts_history_and_text_before_cloud_by_default(monkeypatch):
+    with SessionLocal() as db:
+        db.add(User(name="Michal"))
+        db.add(HouseholdMember(relation="wife", name="Ania"))
+        db.commit()
+
+    mock_cloud = AsyncMock(
+        return_value={"content": "ok", "prompt_tokens": 1, "completion_tokens": 1}
+    )
+    monkeypatch.setattr(chat_service.openrouter_client, "chat", mock_cloud)
+
+    session_id = _make_session()
+    await chat_service.run_turn(session_id, session_id, "web", "Ania is picking up the kids")
+
+    sent_messages = mock_cloud.await_args.args[0]
+    user_message = next(m["content"] for m in sent_messages if m["role"] == "user")
+    assert "Ania" not in user_message
+    assert "[wife]" in user_message
+
+
+async def test_run_turn_falls_back_on_cloud_exception_by_default(monkeypatch):
+    mock_cloud = AsyncMock(side_effect=ConnectionError("openrouter unreachable"))
+    monkeypatch.setattr(chat_service.openrouter_client, "chat", mock_cloud)
+
+    session_id = _make_session()
+    reply = await chat_service.run_turn(session_id, session_id, "web", "hi")
+
+    assert reply == chat_service.CLOUD_ERROR_REPLY
+
+
+async def test_run_turn_publishes_thinking_cloud_status_by_default_for_web(monkeypatch):
+    published = []
+    monkeypatch.setattr(
+        chat_service.redis_client,
+        "publish_status_event",
+        AsyncMock(side_effect=lambda sid, status: published.append((sid, status))),
+    )
+    mock_cloud = AsyncMock(
+        return_value={"content": "ok", "prompt_tokens": 1, "completion_tokens": 1}
+    )
+    monkeypatch.setattr(chat_service.openrouter_client, "chat", mock_cloud)
+
+    session_id = _make_session("web")
+    await chat_service.run_turn(session_id, session_id, "web", "hi")
+
+    assert (session_id, "thinking_cloud") in published
+
+
+async def test_run_turn_logs_cloud_interaction_with_redaction_applied(monkeypatch):
+    mock_cloud = AsyncMock(
+        return_value={"content": "ok", "prompt_tokens": 8, "completion_tokens": 4}
+    )
+    monkeypatch.setattr(chat_service.openrouter_client, "chat", mock_cloud)
+
+    session_id = _make_session()
+    await chat_service.run_turn(session_id, session_id, "web", "hi")
+
+    with SessionLocal() as db:
+        logs = db.query(InteractionLog).order_by(InteractionLog.id).all()
+    assert [log.direction for log in logs] == ["in", "out"]
+    assert all(log.redaction_applied == "yes" for log in logs)
+    assert all(log.agent == "chat_cloud" for log in logs)
+    assert logs[0].tokens_cloud == 8
+    assert logs[1].tokens_cloud == 4
+
+
+# --- Header model-picker (app.model_options) ---------------------------
+
+
+def _set_default_model(key: str) -> None:
+    with SessionLocal() as db:
+        user = db.query(User).first()
+        if user is None:
+            db.add(User(name="Test User", default_chat_model=key))
+        else:
+            user.default_chat_model = key
+        db.commit()
+
+
+async def test_default_model_gpt_routes_to_gpt_slug_and_persists_it(monkeypatch):
+    _set_default_model("gpt")
+    mock_cloud = AsyncMock(
+        return_value={"content": "ok", "prompt_tokens": 1, "completion_tokens": 1}
+    )
+    monkeypatch.setattr(chat_service.openrouter_client, "chat", mock_cloud)
+
+    session_id = _make_session()
+    await chat_service.run_turn(session_id, session_id, "web", "hi")
+
+    mock_cloud.assert_awaited_once()
+    assert mock_cloud.await_args.kwargs["model"] == chat_service.settings.openrouter_gpt_model
+
+    messages = chat_store.list_all_messages(session_id)
+    assistant_msg = next(m for m in messages if m.role == "assistant")
+    assert assistant_msg.model == chat_service.settings.openrouter_gpt_model
+
+
+async def test_default_model_cheap_routes_to_cheap_slug(monkeypatch):
+    _set_default_model("cheap")
+    mock_cloud = AsyncMock(
+        return_value={"content": "ok", "prompt_tokens": 1, "completion_tokens": 1}
+    )
+    monkeypatch.setattr(chat_service.openrouter_client, "chat", mock_cloud)
+
+    session_id = _make_session()
+    await chat_service.run_turn(session_id, session_id, "web", "hi")
+
+    assert mock_cloud.await_args.kwargs["model"] == chat_service.settings.openrouter_cheap_model
+
+
+async def test_default_model_qwen_routes_local_without_prefix(monkeypatch):
+    _set_default_model("qwen")
+    mock_local = AsyncMock(
+        return_value={"content": "ok", "prompt_tokens": 1, "completion_tokens": 1}
+    )
+    monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", mock_local)
+    mock_cloud = AsyncMock()
+    monkeypatch.setattr(chat_service.openrouter_client, "chat", mock_cloud)
+
+    session_id = _make_session()
+    reply = await chat_service.run_turn(session_id, session_id, "web", "hi")
+
+    assert reply == "ok"
+    mock_local.assert_awaited_once()
+    mock_cloud.assert_not_awaited()
+
+
+async def test_local_prefix_overrides_a_cloud_default_model(monkeypatch):
+    _set_default_model("gpt")
+    mock_local = AsyncMock(
+        return_value={"content": "ok", "prompt_tokens": 1, "completion_tokens": 1}
+    )
+    monkeypatch.setattr(chat_service.ollama_client, "chat_with_tools", mock_local)
+    mock_cloud = AsyncMock()
+    monkeypatch.setattr(chat_service.openrouter_client, "chat", mock_cloud)
+
+    session_id = _make_session()
+    await chat_service.run_turn(session_id, session_id, "web", "Local: hi")
+
+    mock_local.assert_awaited_once()
+    mock_cloud.assert_not_awaited()
+
+
+async def test_default_model_auto_keeps_todays_sonnet_default(monkeypatch):
+    _set_default_model("auto")
+    mock_cloud = AsyncMock(
+        return_value={"content": "ok", "prompt_tokens": 1, "completion_tokens": 1}
+    )
+    monkeypatch.setattr(chat_service.openrouter_client, "chat", mock_cloud)
+
+    session_id = _make_session()
+    await chat_service.run_turn(session_id, session_id, "web", "hi")
+
+    assert mock_cloud.await_args.kwargs["model"] is None
+    messages = chat_store.list_all_messages(session_id)
+    assistant_msg = next(m for m in messages if m.role == "assistant")
+    assert assistant_msg.model == chat_service.settings.openrouter_model
