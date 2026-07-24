@@ -2,8 +2,11 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from sqlalchemy.orm import Session
 
 from app import auth
+from app.db import get_db
+from app.models import User
 
 logger = logging.getLogger("lifeos.auth")
 
@@ -67,5 +70,9 @@ async def logout():
 
 
 @router.get("/me")
-async def me(email: str = Depends(auth.require_auth)):
-    return {"email": email}
+async def me(email: str = Depends(auth.require_auth), db: Session = Depends(get_db)):
+    # Single-tenant app — one User row holds the display name shown in the
+    # webapp greeting (app/models.py's User.name), separate from the Google
+    # account email used for auth.
+    user = db.query(User).first()
+    return {"email": email, "name": user.name if user else None}

@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen3.6:35b-a3b"
 
     openrouter_api_key: str = ""
+    openrouter_model: str = "anthropic/claude-sonnet-5"
+    openrouter_vision_model: str = "google/gemini-2.5-flash"
 
     google_maps_api_key: str = ""
 

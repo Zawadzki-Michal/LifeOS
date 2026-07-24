@@ -30,6 +30,7 @@ from app.auth import SESSION_COOKIE, create_session_token
 from app.db import Base, engine
 from app.routers import auth as auth_router
 from app.routers import sessions as sessions_router
+from app.routers import usage as usage_router
 
 
 def _ensure_test_database() -> None:
@@ -88,6 +89,7 @@ def api_app() -> FastAPI:
     app = FastAPI()
     app.include_router(auth_router.router)
     app.include_router(sessions_router.router)
+    app.include_router(usage_router.router)
     return app
 
 

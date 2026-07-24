@@ -9,7 +9,7 @@ import datetime as dt
 import logging
 from zoneinfo import ZoneInfo
 
-from app import calendar_client, finance_client, health_client, maps_client, ollama_client
+from app import calendar_client, chat_store, finance_client, health_client, maps_client, ollama_client, redis_client
 from app.config import settings
 from app.db import SessionLocal
 from app.prompts import system_prompt
@@ -22,6 +22,24 @@ TZ = ZoneInfo("Europe/Warsaw")
 FINANCE_CHECK_TIME = (8, 0)
 MORNING_MOTIVATION_TIME = (7, 0)
 EVENING_FEEDBACK_TIME = (21, 0)
+
+
+async def _broadcast_to_web(text: str) -> None:
+    """Mirrors a proactive message into the dedicated web-channel scheduler
+    session and publishes it over Redis pub/sub so an open webapp tab shows
+    it live — same content Telegram gets, just a second surface."""
+    session = chat_store.get_or_create_scheduler_session()
+    message = chat_store.append_message(session.id, "assistant", text, model=settings.ollama_model)
+    await redis_client.publish_chat_event(
+        session.id,
+        {
+            "id": message.id,
+            "role": message.role,
+            "content": message.content,
+            "created_at": message.created_at.isoformat(),
+            "model": message.model,
+        },
+    )
 
 
 async def run_daily_checks() -> None:
@@ -55,6 +73,10 @@ async def run_daily_checks() -> None:
             await send_message(chat_id, msg)
         except Exception:
             logger.exception("Failed to send proactive finance message")
+        try:
+            await _broadcast_to_web(msg)
+        except Exception:
+            logger.exception("Failed to mirror proactive finance message to webapp")
 
 
 async def _office_commute_note(target_date: dt.date) -> str | None:
@@ -87,6 +109,10 @@ async def _send_composed_message(context: str, instruction: str) -> None:
     ]
     result = await ollama_client.chat(settings.ollama_model, messages)
     await send_message(chat_id, result["content"])
+    try:
+        await _broadcast_to_web(result["content"])
+    except Exception:
+        logger.exception("Failed to mirror proactive message to webapp")
 
 
 async def send_morning_motivation() -> None:

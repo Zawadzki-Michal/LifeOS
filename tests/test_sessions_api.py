@@ -15,7 +15,21 @@ def test_auth_me_requires_auth(client):
 def test_auth_me_returns_email_when_authed(authed_client):
     resp = authed_client.get("/api/auth/me")
     assert resp.status_code == 200
-    assert resp.json() == {"email": "test@example.com"}
+    assert resp.json() == {"email": "test@example.com", "name": None}
+
+
+def test_auth_me_returns_user_name_when_present(authed_client):
+    from app.db import SessionLocal
+    from app.models import User
+
+    with SessionLocal() as db:
+        db.add(User(name="Michal"))
+        db.commit()
+
+    resp = authed_client.get("/api/auth/me")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"email": "test@example.com", "name": "Michal"}
 
 
 def test_create_and_list_sessions(authed_client):
@@ -130,6 +144,7 @@ def test_voice_message_transcribes_and_replies(authed_client, monkeypatch):
     monkeypatch.setattr(
         sessions_router.chat_service, "run_turn", AsyncMock(return_value="Nothing on today.")
     )
+    monkeypatch.setattr(sessions_router.redis_client, "publish_status_event", AsyncMock())
 
     created = authed_client.post("/api/sessions", json={}).json()
     resp = authed_client.post(
@@ -145,10 +160,28 @@ def test_voice_message_transcribes_and_replies(authed_client, monkeypatch):
     assert updated["title"] == "what's my schedule today"
 
 
+def test_voice_message_publishes_transcribing_status(authed_client, monkeypatch):
+    from app.routers import sessions as sessions_router
+
+    monkeypatch.setattr(sessions_router.speech, "transcribe", AsyncMock(return_value="hi"))
+    monkeypatch.setattr(sessions_router.chat_service, "run_turn", AsyncMock(return_value="ok"))
+    status_mock = AsyncMock()
+    monkeypatch.setattr(sessions_router.redis_client, "publish_status_event", status_mock)
+
+    created = authed_client.post("/api/sessions", json={}).json()
+    authed_client.post(
+        f"/api/sessions/{created['id']}/voice-messages",
+        files={"file": ("voice.webm", b"fake-audio-bytes", "audio/webm")},
+    )
+
+    status_mock.assert_awaited_once_with(created["id"], "transcribing")
+
+
 def test_voice_message_with_no_discernible_speech_returns_400(authed_client, monkeypatch):
     from app.routers import sessions as sessions_router
 
     monkeypatch.setattr(sessions_router.speech, "transcribe", AsyncMock(return_value=""))
+    monkeypatch.setattr(sessions_router.redis_client, "publish_status_event", AsyncMock())
 
     created = authed_client.post("/api/sessions", json={}).json()
     resp = authed_client.post(
@@ -167,3 +200,115 @@ def test_voice_message_to_missing_session_404s(authed_client, monkeypatch):
         files={"file": ("voice.webm", b"fake-audio-bytes", "audio/webm")},
     )
     assert resp.status_code == 404
+
+
+def test_image_message_analyzes_and_replies(authed_client, monkeypatch):
+    from app.routers import sessions as sessions_router
+
+    monkeypatch.setattr(
+        sessions_router.reasoning_client,
+        "analyze_image",
+        AsyncMock(return_value=("8000 kroków dzisiaj", 15)),
+    )
+    monkeypatch.setattr(sessions_router.redis_client, "publish_status_event", AsyncMock())
+
+    created = authed_client.post("/api/sessions", json={}).json()
+    resp = authed_client.post(
+        f"/api/sessions/{created['id']}/image-messages",
+        files={"file": ("screenshot.png", b"fake-png-bytes", "image/png")},
+        data={"caption": "ile krokow dzisiaj"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"reply": "8000 kroków dzisiaj"}
+
+    messages = authed_client.get(f"/api/sessions/{created['id']}/messages").json()
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == "📷 ile krokow dzisiaj"
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["content"] == "8000 kroków dzisiaj"
+    assert messages[1]["model"] == sessions_router.settings.openrouter_vision_model
+
+    # Auto-titles the session, same as text/voice messages.
+    updated = authed_client.get("/api/sessions").json()[0]
+    assert updated["title"] == "📷 ile krokow dzisiaj"
+
+
+def test_image_message_without_caption_uses_placeholder_title(authed_client, monkeypatch):
+    from app.routers import sessions as sessions_router
+
+    monkeypatch.setattr(
+        sessions_router.reasoning_client, "analyze_image", AsyncMock(return_value=("ok", 5))
+    )
+    monkeypatch.setattr(sessions_router.redis_client, "publish_status_event", AsyncMock())
+
+    created = authed_client.post("/api/sessions", json={}).json()
+    authed_client.post(
+        f"/api/sessions/{created['id']}/image-messages",
+        files={"file": ("screenshot.png", b"fake-png-bytes", "image/png")},
+    )
+
+    messages = authed_client.get(f"/api/sessions/{created['id']}/messages").json()
+    assert messages[0]["content"] == "📷 [obraz]"
+
+
+def test_image_message_publishes_analyzing_status(authed_client, monkeypatch):
+    from app.routers import sessions as sessions_router
+
+    monkeypatch.setattr(
+        sessions_router.reasoning_client, "analyze_image", AsyncMock(return_value=("ok", 5))
+    )
+    status_mock = AsyncMock()
+    monkeypatch.setattr(sessions_router.redis_client, "publish_status_event", status_mock)
+
+    created = authed_client.post("/api/sessions", json={}).json()
+    authed_client.post(
+        f"/api/sessions/{created['id']}/image-messages",
+        files={"file": ("screenshot.png", b"fake-png-bytes", "image/png")},
+    )
+
+    status_mock.assert_awaited_once_with(created["id"], "analyzing_image")
+
+
+def test_image_message_rejects_empty_upload(authed_client, monkeypatch):
+    from app.routers import sessions as sessions_router
+
+    monkeypatch.setattr(sessions_router.redis_client, "publish_status_event", AsyncMock())
+
+    created = authed_client.post("/api/sessions", json={}).json()
+    resp = authed_client.post(
+        f"/api/sessions/{created['id']}/image-messages",
+        files={"file": ("empty.png", b"", "image/png")},
+    )
+    assert resp.status_code == 400
+
+
+def test_image_message_to_missing_session_404s(authed_client):
+    resp = authed_client.post(
+        "/api/sessions/999999/image-messages",
+        files={"file": ("screenshot.png", b"fake-png-bytes", "image/png")},
+    )
+    assert resp.status_code == 404
+
+
+def test_image_message_logs_interaction_with_vision_agent(authed_client, monkeypatch):
+    from app.routers import sessions as sessions_router
+
+    monkeypatch.setattr(
+        sessions_router.reasoning_client, "analyze_image", AsyncMock(return_value=("ok", 15))
+    )
+    monkeypatch.setattr(sessions_router.redis_client, "publish_status_event", AsyncMock())
+
+    created = authed_client.post("/api/sessions", json={}).json()
+    authed_client.post(
+        f"/api/sessions/{created['id']}/image-messages",
+        files={"file": ("screenshot.png", b"fake-png-bytes", "image/png")},
+    )
+
+    from app.db import SessionLocal
+    from app.models import InteractionLog
+
+    with SessionLocal() as db:
+        log = db.query(InteractionLog).filter(InteractionLog.agent == "vision").one()
+    assert log.tokens_cloud == 15
+    assert log.channel == "web"

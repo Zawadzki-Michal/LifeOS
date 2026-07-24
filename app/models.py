@@ -417,6 +417,7 @@ class ChatSession(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_scheduler: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class ChatMessage(Base):
@@ -428,4 +429,5 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text)
     tool_calls_json: Mapped[dict | None] = mapped_column(JSON)
     tokens: Mapped[int | None] = mapped_column(Integer)
+    model: Mapped[str | None] = mapped_column(String(64))  # which model actually produced this reply
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
