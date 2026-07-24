@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.db import SessionLocal
-from app.routers import auth, health, health_sync, sessions, stream, telegram, usage
+from app.routers import app_settings, auth, health, health_sync, sessions, stream, telegram, usage
 from app.scheduler import start_background_tasks
 from app.seed import seed_initial_data
 
@@ -36,6 +36,7 @@ app.include_router(auth.router)
 app.include_router(sessions.router)
 app.include_router(stream.router)
 app.include_router(usage.router)
+app.include_router(app_settings.router)
 
 if STATIC_DIR.is_dir():
     app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

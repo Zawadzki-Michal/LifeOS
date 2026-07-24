@@ -6,7 +6,9 @@ its purpose. Asked live to propose a meal from fridge contents, it answered
 directly instead of routing to OpenRouter. Fixed by carving out an explicit
 exception in app/prompts.py; this pins that exception down."""
 
-from app.prompts import TOOL_GUIDANCE
+from app.db import SessionLocal
+from app.models import User
+from app.prompts import TOOL_GUIDANCE, system_prompt
 
 
 def test_final_catchall_does_not_block_consult_advanced_model():
@@ -29,3 +31,30 @@ def test_calendar_writes_require_an_explicit_specific_ask():
     guidance = TOOL_GUIDANCE
     assert "NOT a request to create real events" in guidance
     assert "explicit, specific scheduling ask" in guidance
+
+
+def test_include_tools_false_omits_tool_names_from_the_prompt():
+    """Regression test for a real bug: the default-to-cloud path (no
+    'Local:' prefix, see app/chat_service.py::_run_remote_turn) reused the
+    full tool-calling prompt even though OpenRouter isn't given any tools —
+    Sonnet then narrated calling get_daily_nutrition in plain text instead
+    of actually being able to. include_tools=False must swap in guidance
+    that tells the model it has no tools at all."""
+    with SessionLocal() as db:
+        db.add(User(name="Test User"))
+        db.commit()
+        prompt = system_prompt(db, "web", include_tools=False)
+
+    assert "get_daily_nutrition" not in prompt
+    assert "consult_advanced_model" not in prompt
+    assert "no tools" in prompt.lower()
+    assert "Local:" in prompt
+
+
+def test_include_tools_true_is_still_the_default():
+    with SessionLocal() as db:
+        db.add(User(name="Test User"))
+        db.commit()
+        prompt = system_prompt(db, "web")
+
+    assert "get_daily_nutrition" in prompt

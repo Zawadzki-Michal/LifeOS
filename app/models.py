@@ -35,6 +35,10 @@ class User(Base):
     locale: Mapped[str] = mapped_column(String(16), default="en")
     quiet_until: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     tone_profile: Mapped[str | None] = mapped_column(String(64))
+    # Header model-picker choice — a key into app.model_options.MODEL_CHOICES
+    # (e.g. "auto", "sonnet", "gpt", "cheap", "qwen"), not a raw model slug.
+    # None means "auto" (today's default: cloud unless "Local:" prefixed).
+    default_chat_model: Mapped[str | None] = mapped_column(String(16))
 
 
 class HouseholdMember(Base):

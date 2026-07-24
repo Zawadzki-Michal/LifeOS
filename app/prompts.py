@@ -106,7 +106,20 @@ TOOL_GUIDANCE = (
 )
 
 
-def system_prompt(db: Session, channel: str = "telegram", terse: bool = False) -> str:
+NO_TOOLS_GUIDANCE = (
+    "You have no tools and no live data access in this reply — no calendar, "
+    "expenses, health, or nutrition lookups, and you cannot check or change "
+    "anything. Answer only from what's already in this prompt and the "
+    "conversation so far. If the question genuinely needs live data or an "
+    "action (checking or changing something real), say so plainly and tell "
+    "the user to start their message with \"Local:\" instead of answering as "
+    "if you looked something up or did something you didn't."
+)
+
+
+def system_prompt(
+    db: Session, channel: str = "telegram", terse: bool = False, include_tools: bool = True
+) -> str:
     user = db.query(User).first()
     if user is None:
         return "You are LifeOS, a personal accountability assistant. Keep replies concise."
@@ -169,6 +182,6 @@ def system_prompt(db: Session, channel: str = "telegram", terse: bool = False) -
     if categories:
         lines.append("Existing expense categories: " + ", ".join(c.name for c in categories) + ".")
 
-    lines.append(TOOL_GUIDANCE)
+    lines.append(TOOL_GUIDANCE if include_tools else NO_TOOLS_GUIDANCE)
 
     return " ".join(lines)

@@ -16,6 +16,8 @@ class Settings(BaseSettings):
 
     openrouter_api_key: str = ""
     openrouter_model: str = "anthropic/claude-sonnet-5"
+    openrouter_gpt_model: str = "openai/gpt-5"
+    openrouter_cheap_model: str = "openai/gpt-5-nano"
     openrouter_vision_model: str = "google/gemini-2.5-flash"
 
     google_maps_api_key: str = ""

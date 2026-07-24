@@ -69,4 +69,7 @@ export const api = {
     return requestMultipart(`/sessions/${id}/image-messages`, form);
   },
   getOpenRouterUsage: () => request("/usage/openrouter"),
+  getSettings: () => request("/settings"),
+  updateSettings: (patch) =>
+    request("/settings", { method: "PATCH", body: JSON.stringify(patch) }),
 };

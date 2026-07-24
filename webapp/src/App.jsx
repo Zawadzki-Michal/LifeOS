@@ -9,6 +9,7 @@ import ChatThread from "./components/ChatThread.jsx";
 import ChatInput from "./components/ChatInput.jsx";
 import ArchivedPanel from "./components/ArchivedPanel.jsx";
 import UsagePanel from "./components/UsagePanel.jsx";
+import ModelPicker from "./components/ModelPicker.jsx";
 
 const VOICE_PLACEHOLDER = "🎤 …";
 const IMAGE_PLACEHOLDER = "📷 …";
@@ -31,6 +32,8 @@ export default function App() {
   const [unreadSessionIds, setUnreadSessionIds] = useState(() => new Set());
   const [pendingStatus, setPendingStatus] = useState(null);
   const [draftText, setDraftText] = useState("");
+  const [modelOptions, setModelOptions] = useState([{ key: "auto", label: "Auto" }]);
+  const [defaultModel, setDefaultModel] = useState("auto");
   // Tracks the session id a send is in flight for — separate from activeId
   // because a brand-new session's id isn't known/set as active until after
   // creation, but status events for it start arriving from the backend
@@ -51,6 +54,26 @@ export default function App() {
       })
       .catch(() => setAuthState("anon"));
   }, []);
+
+  useEffect(() => {
+    if (authState !== "authed") return;
+    api
+      .getSettings()
+      .then((s) => {
+        setDefaultModel(s.default_model);
+        setModelOptions(s.options);
+      })
+      .catch(() => {});
+  }, [authState]);
+
+  async function handleModelChange(key) {
+    setDefaultModel(key);
+    try {
+      await api.updateSettings({ default_model: key });
+    } catch (e) {
+      setError(e.message);
+    }
+  }
 
   const refreshSessions = useCallback(async () => {
     const list = await api.listSessions();
@@ -292,17 +315,22 @@ export default function App() {
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
         <div
-          className="flex items-center gap-3 border-b border-border p-3 md:hidden"
+          className="flex items-center gap-3 border-b border-border p-3"
           style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
         >
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="text-ink"
-            aria-label="Open conversations"
-          >
-            <Menu size={22} />
-          </button>
-          <span className="text-sm font-semibold text-ink">LifeOS</span>
+          <div className="flex items-center gap-3 md:hidden">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="text-ink"
+              aria-label="Open conversations"
+            >
+              <Menu size={22} />
+            </button>
+            <span className="text-sm font-semibold text-ink">LifeOS</span>
+          </div>
+          <div className="ml-auto">
+            <ModelPicker value={defaultModel} options={modelOptions} onChange={handleModelChange} />
+          </div>
         </div>
         {error && (
           <div className="border-b border-danger/30 bg-danger-bg px-4 py-2 text-sm text-danger">
