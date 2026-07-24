@@ -1,0 +1,17 @@
+# Headless service governing the StatefulSet — also gives the app a stable
+# "postgres" DNS name to connect to (single replica, so this is sufficient;
+# no separate ClusterIP service needed).
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    app: postgres
+    {{- include "lifeos.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

@@ -1,0 +1,119 @@
+# Phase 1 scope: postgres, redis, app only. n8n/adminer/ngrok/backups are
+# added in later phases (see C:\Users\mzzaw\.claude\plans\hey-lets-pick-up-fuzzy-wadler.md).
+#
+# Secrets are NOT templated here — created once via:
+#   kubectl create secret generic lifeos-secrets -n lifeos --from-env-file=.env.k8s-secrets
+# (see deploy/README.md). This chart only references that Secret by name.
+
+image:
+  # Built locally and imported via `docker save | k3s ctr images import -`.
+  # Bump the tag on every real deploy — imagePullPolicy: Never means k3s
+  # will silently keep running whatever tag is already loaded otherwise.
+  repository: lifeos-app
+  tag: "20260724-1848"
+  pullPolicy: Never
+
+secretName: lifeos-secrets
+
+app:
+  replicas: 1 # must stay 1 — app/scheduler.py runs in-process asyncio broadcast loops
+  port: 8000
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+postgres:
+  image: pgvector/pgvector:pg16
+  storageClassName: local-path
+  storageSize: 10Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+backup:
+  # Separate PVC from postgres-data on purpose — protects against logical
+  # corruption/bad migrations, NOT physical disk failure (same physical
+  # disk either way). The offBox block below is the actual off-disk copy.
+  storageClassName: local-path
+  storageSize: 10Gi
+  schedule: "0 4 * * *" # 4am — clear of the scheduler's 7/8/21:00 windows
+  retentionDays: 14
+  offBox:
+    enabled: true
+    # WSL2 DrvFs path to the Windows-side GoogleDrive-synced folder — the
+    # already-running GoogleDrive desktop client is what actually gets this
+    # off-box from here, no rclone/API credentials needed. Re-check this
+    # path if the WSL2 distro or Windows username ever changes.
+    hostPath: "/mnt/c/Users/mzzaw/Documents/GoogleDrive/lifeos-backups"
+
+redis:
+  image: redis:7-alpine
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+n8n:
+  image: n8nio/n8n:latest
+  storageClassName: local-path
+  storageSize: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    # 512Mi OOM-killed it on first deploy (Node's heap sizing needs real
+    # headroom beyond n8n's own baseline usage) — 1Gi is comfortable.
+    limits:
+      memory: 1Gi
+
+adminer:
+  enabled: true
+  image: adminer:latest
+
+ngrok:
+  enabled: true
+  image: ngrok/ngrok:latest
+
+monitoring:
+  # Requires the separate kube-prometheus-stack release (deploy/README.md
+  # Phase 4) to be installed first — its ServiceMonitor CRD must exist.
+  enabled: true
+
+# Non-secret config, becomes the lifeos-config ConfigMap. Anything with a
+# credential embedded (DATABASE_URL, tokens, API keys) lives in the
+# externally-created Secret instead — see deploy/README.md.
+config:
+  REDIS_URL: "redis://redis:6379/0"
+  OLLAMA_BASE_URL: "http://ollama:11434"
+  # Cross-namespace in-cluster Service DNS — kube-prometheus-stack's Grafana
+  # subchart names its Service "<release>-grafana"; no selector-less
+  # Service/EndpointSlice needed here (unlike Ollama) since Grafana runs
+  # inside the cluster, just in a different namespace.
+  GRAFANA_BASE_URL: "http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local"
+  OLLAMA_MODEL: "qwen3.6:35b-a3b"
+  OPENROUTER_MODEL: "anthropic/claude-sonnet-5"
+  OPENROUTER_GPT_MODEL: "openai/gpt-5"
+  OPENROUTER_CHEAP_MODEL: "openai/gpt-5-nano"
+  OPENROUTER_VISION_MODEL: "google/gemini-2.5-flash"
+  GOOGLE_OAUTH_REDIRECT_URI: "https://barber-getup-crinkly.ngrok-free.dev/api/auth/callback"
+  WEBAPP_ALLOWED_EMAILS: "m.z.zawadzkimichal@gmail.com"
+  N8N_BASIC_AUTH_USER: "admin"
+
+# Selector-less Service + Endpoints pointing at the WSL2 gateway IP that
+# represents the Windows host (Ollama runs natively there, not in-cluster).
+# Find it from inside the WSL2 distro: `ip route show | grep default`.
+ollama:
+  # WSL2 default-route gateway IP (== the Windows host as seen from pods).
+  # Re-check with `ip route show | grep default` inside the k3s WSL2 distro
+  # if Ollama connectivity ever breaks (e.g. after a Windows update resets
+  # WSL's virtual network) — see deploy/README.md.
+  hostIP: "172.27.176.1"
+  port: 11434

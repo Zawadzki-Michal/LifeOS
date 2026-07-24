@@ -1,8 +1,19 @@
 from typing import Awaitable, Callable
 
 import httpx
+from prometheus_client import Histogram
 
 from app.config import settings
+
+# Labeled by model/endpoint so a GPU-contention slowdown (e.g. a game
+# competing for the same GPU as Ollama) shows up as a visible latency spike
+# in Grafana instead of just "felt stuck" — see deploy/README.md Phase 4.
+OLLAMA_REQUEST_DURATION = Histogram(
+    "ollama_request_duration_seconds",
+    "Ollama API request duration",
+    ["endpoint", "model"],
+    buckets=(0.5, 1, 2.5, 5, 10, 20, 30, 60, 120, 180),
+)
 
 
 class TerminalToolResult:
@@ -27,20 +38,22 @@ async def list_models() -> list[str]:
 
 async def generate(model: str, prompt: str) -> str:
     async with httpx.AsyncClient(timeout=180) as client:
-        resp = await client.post(
-            f"{settings.ollama_base_url}/api/generate",
-            json={"model": model, "prompt": prompt, "stream": False},
-        )
+        with OLLAMA_REQUEST_DURATION.labels(endpoint="/api/generate", model=model).time():
+            resp = await client.post(
+                f"{settings.ollama_base_url}/api/generate",
+                json={"model": model, "prompt": prompt, "stream": False},
+            )
         resp.raise_for_status()
         return resp.json()["response"]
 
 
 async def chat(model: str, messages: list[dict]) -> dict:
     async with httpx.AsyncClient(timeout=180) as client:
-        resp = await client.post(
-            f"{settings.ollama_base_url}/api/chat",
-            json={"model": model, "messages": messages, "stream": False},
-        )
+        with OLLAMA_REQUEST_DURATION.labels(endpoint="/api/chat", model=model).time():
+            resp = await client.post(
+                f"{settings.ollama_base_url}/api/chat",
+                json={"model": model, "messages": messages, "stream": False},
+            )
         resp.raise_for_status()
         data = resp.json()
         return {
@@ -61,10 +74,11 @@ async def chat_with_tools(
     total_completion_tokens = 0
     async with httpx.AsyncClient(timeout=180) as client:
         for _ in range(max_iters):
-            resp = await client.post(
-                f"{settings.ollama_base_url}/api/chat",
-                json={"model": model, "messages": messages, "tools": tools, "stream": False},
-            )
+            with OLLAMA_REQUEST_DURATION.labels(endpoint="/api/chat", model=model).time():
+                resp = await client.post(
+                    f"{settings.ollama_base_url}/api/chat",
+                    json={"model": model, "messages": messages, "tools": tools, "stream": False},
+                )
             resp.raise_for_status()
             data = resp.json()
             total_prompt_tokens += data.get("prompt_eval_count") or 0

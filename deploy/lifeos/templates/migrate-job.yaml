@@ -1,0 +1,27 @@
+# Not run automatically on every deploy — invoked manually via:
+#   kubectl create job --from=cronjob/lifeos-migrate lifeos-migrate-manual -n lifeos
+# (see deploy/README.md). Matches the existing "run alembic manually" habit
+# from docker-compose rather than a silent auto-migrate-on-boot pattern.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: lifeos-migrate
+  labels:
+    {{- include "lifeos.labels" . | nindent 4 }}
+spec:
+  schedule: "0 0 31 2 *" # never actually fires (Feb 31st) — this CronJob only exists to be triggered manually via `kubectl create job --from=cronjob/...`
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: migrate
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["alembic", "upgrade", "head"]
+              envFrom:
+                - configMapRef:
+                    name: lifeos-config
+                - secretRef:
+                    name: {{ .Values.secretName }}

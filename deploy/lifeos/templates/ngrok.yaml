@@ -1,0 +1,40 @@
+{{- if .Values.ngrok.enabled }}
+# Only ngrok's target changes vs. compose (app:8000 -> lifeos-app:8000) —
+# same stable static domain, so Telegram's webhook URL and the Google OAuth
+# redirect URI both keep working with zero external re-registration.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ngrok
+  labels:
+    app: ngrok
+    {{- include "lifeos.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ngrok
+  template:
+    metadata:
+      labels:
+        app: ngrok
+    spec:
+      containers:
+        - name: ngrok
+          image: {{ .Values.ngrok.image }}
+          args:
+            - http
+            - --url=$(NGROK_STATIC_DOMAIN)
+            - lifeos-app:{{ .Values.app.port }}
+          env:
+            - name: NGROK_AUTHTOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: NGROK_AUTHTOKEN
+            - name: NGROK_STATIC_DOMAIN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: NGROK_STATIC_DOMAIN
+{{- end }}

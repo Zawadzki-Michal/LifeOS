@@ -1,0 +1,80 @@
+{
+  "title": "LifeOS Overview",
+  "uid": "lifeos-overview",
+  "schemaVersion": 39,
+  "tags": ["lifeos"],
+  "timezone": "browser",
+  "time": { "from": "now-24h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Ollama request latency (p50/p95/p99)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(ollama_request_duration_seconds_bucket[5m])) by (le, endpoint, model))",
+          "legendFormat": "p50 {{endpoint}} {{model}}"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(ollama_request_duration_seconds_bucket[5m])) by (le, endpoint, model))",
+          "legendFormat": "p95 {{endpoint}} {{model}}"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum(rate(ollama_request_duration_seconds_bucket[5m])) by (le, endpoint, model))",
+          "legendFormat": "p99 {{endpoint}} {{model}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "App HTTP request rate & p95 latency",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 9 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(http_requests_total{handler!=\"/metrics\"}[5m])) by (handler, status)",
+          "legendFormat": "req/s {{handler}} {{status}}"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{handler!=\"/metrics\"}[5m])) by (le, handler))",
+          "legendFormat": "p95 latency {{handler}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "OpenRouter spend over time",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "lifeos-postgres-openrouter" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "lifeos-postgres-openrouter" },
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroup(ts, '1h') AS time, source, SUM(cost) AS cost FROM openrouter_usage_log WHERE $__timeFilter(ts) GROUP BY 1, source ORDER BY 1",
+          "rawQuery": true,
+          "editorMode": "code",
+          "sql": { "columns": [], "groupBy": [], "limit": 50 }
+        }
+      ]
+    }
+  ]
+}

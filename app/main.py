@@ -5,9 +5,20 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.db import SessionLocal
-from app.routers import app_settings, auth, health, health_sync, sessions, stream, telegram, usage
+from app.routers import (
+    app_settings,
+    auth,
+    grafana,
+    health,
+    health_sync,
+    sessions,
+    stream,
+    telegram,
+    usage,
+)
 from app.scheduler import start_background_tasks
 from app.seed import seed_initial_data
 
@@ -37,6 +48,12 @@ app.include_router(sessions.router)
 app.include_router(stream.router)
 app.include_router(usage.router)
 app.include_router(app_settings.router)
+app.include_router(grafana.router)
+
+# Registered before the StaticFiles catch-all mount below — a Mount("/")
+# would otherwise shadow /metrics since Starlette matches routes in
+# registration order.
+Instrumentator().instrument(app).expose(app)
 
 if STATIC_DIR.is_dir():
     app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

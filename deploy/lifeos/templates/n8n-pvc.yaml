@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: n8n-data
+  labels:
+    {{- include "lifeos.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.n8n.storageClassName }}
+  resources:
+    requests:
+      storage: {{ .Values.n8n.storageSize }}

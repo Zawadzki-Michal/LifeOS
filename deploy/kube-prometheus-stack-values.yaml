@@ -1,0 +1,127 @@
+# Values override for the kube-prometheus-stack release (a separate Helm
+# release from prometheus-community's upstream chart, NOT part of the
+# deploy/lifeos chart — see deploy/README.md's Phase 4 section). Sized down
+# from the chart's defaults for a single-node homelab cluster sharing a
+# 12GB WSL2 memory ceiling with everything else (see .wslconfig).
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 768Mi
+    # Single node, no need for real storage durability here — Prometheus's
+    # own TSDB on an emptyDir is fine to lose on pod restart; the actual
+    # source-of-truth metrics (app DB, logs) live elsewhere.
+    storageSpec: {}
+
+grafana:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  persistence:
+    enabled: false # dashboards are provisioned via this values file / ConfigMaps, not hand-edited state worth persisting yet
+  # Reverse-proxied through the FastAPI app at /api/grafana/ (see
+  # app/routers/grafana.py) so Grafana rides the app's existing public
+  # domain + Google-OAuth session gate, without ever exposing Grafana's own
+  # login to the internet. Grafana's Service stays ClusterIP-only — this is
+  # the sole external path to it.
+  grafana.ini:
+    server:
+      # Hardcoded, not %(protocol)s/%(domain)s placeholders — those resolved
+      # to Grafana's internal default ("http://localhost/...") instead of the
+      # real ngrok domain, breaking any absolute link Grafana's JS builds
+      # from appUrl (confirmed via the embedded appUrl in its served HTML).
+      # Must match the FastAPI proxy's mount prefix exactly. Update this if
+      # the ngrok domain ever changes.
+      domain: "barber-getup-crinkly.ngrok-free.dev"
+      root_url: "https://barber-getup-crinkly.ngrok-free.dev/api/grafana/"
+      # false, not true: the FastAPI proxy (app/routers/grafana.py) already
+      # strips the /api/grafana prefix before forwarding to Grafana, so
+      # Grafana's own router must NOT also expect that prefix on incoming
+      # requests — root_url above still tells Grafana what URL to put in any
+      # links it generates. Setting this true caused an infinite redirect
+      # loop: Grafana redirected bare paths to the prefixed URL, the proxy
+      # stripped the prefix again on the next request, repeat forever.
+      serve_from_sub_path: false
+    security:
+      allow_embedding: true # required for the webapp's <iframe> to render this at all
+    auth.anonymous:
+      # Safe because Grafana's Service is unreachable from outside the
+      # cluster except through the already-authenticated proxy above.
+      # Accepted risk: any other in-cluster pod (n8n, adminer, etc.) could
+      # also reach this Service directly and get unauthenticated Viewer
+      # access, since there's no NetworkPolicy isolating namespaces today —
+      # same ambient-trust model already accepted for Postgres/Redis.
+      enabled: true
+      org_role: Viewer
+    auth:
+      disable_login_form: true # nothing should ever reach Grafana's own login
+    live:
+      # Grafana Live (websocket push) doesn't work through this proxy — no
+      # WebSocket route exists in app/routers/grafana.py, only plain HTTP.
+      # Left enabled, the frontend just endlessly retries a failing
+      # handshake; disabling it outright stops that noise since plain
+      # dashboard viewing (polling refresh) never needed it anyway.
+      max_connections: 0
+  # Least-privilege: a dedicated grafana_ro Postgres role (SELECT-only on
+  # openrouter_usage_log — see app/models.py's OpenRouterUsageLog), not the
+  # app's own lifeos superuser. Password lives in a Secret created directly
+  # in this (monitoring) namespace — lifeos-secrets in the lifeos namespace
+  # can't be referenced cross-namespace, and mirroring/copying it would just
+  # be broader access than this data source actually needs.
+  envValueFrom:
+    GRAFANA_LIFEOS_PG_PASSWORD:
+      secretKeyRef:
+        name: grafana-lifeos-pg
+        key: password
+  additionalDataSources:
+    - name: LifeOS Postgres (OpenRouter usage)
+      # Fixed uid so the LifeOS Overview dashboard (deploy/lifeos/dashboards/
+      # lifeos-overview.json) can reference this datasource deterministically
+      # instead of relying on an auto-generated uid.
+      uid: lifeos-postgres-openrouter
+      type: postgres
+      url: postgres.lifeos.svc.cluster.local:5432
+      database: lifeos
+      user: grafana_ro
+      jsonData:
+        # database ALSO needs to live here, not just at the top level above —
+        # newer grafana-postgresql-datasource versions (13.x) read the
+        # default database from jsonData.database at query time; without it
+        # the query editor throws "you do not currently have a default
+        # database configured" and never issues a query at all (root cause
+        # of the LifeOS Overview dashboard's OpenRouter panel showing
+        # "No data" — confirmed via browser console while debugging live).
+        database: lifeos
+        sslmode: disable
+        postgresVersion: 1600
+      secureJsonData:
+        password: $__env{GRAFANA_LIFEOS_PG_PASSWORD}
+
+alertmanager:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true
