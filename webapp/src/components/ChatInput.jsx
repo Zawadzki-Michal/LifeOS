@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { ArrowUp, Camera, Mic, Square } from "lucide-react";
 
 // Formats picked in preference order — Safari (incl. iOS) doesn't support
 // webm, only mp4/aac; Chrome/Firefox support webm/opus. Whisper on the
@@ -16,19 +17,27 @@ function pickMimeType() {
   return CANDIDATE_MIME_TYPES.find((t) => MediaRecorder.isTypeSupported(t)) || "";
 }
 
-export default function ChatInput({ onSend, onSendVoice, disabled }) {
-  const [text, setText] = useState("");
+export default function ChatInput({ value, onChange, onSend, onSendVoice, onSendImage, disabled }) {
   const [recording, setRecording] = useState(false);
   const [micError, setMicError] = useState(null);
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const streamRef = useRef(null);
+  const imageInputRef = useRef(null);
 
   function submit() {
-    const trimmed = text.trim();
+    const trimmed = value.trim();
     if (!trimmed || disabled) return;
     onSend(trimmed);
-    setText("");
+    onChange("");
+  }
+
+  function handleImagePicked(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow picking the same file again later
+    if (!file || disabled) return;
+    onSendImage(file, value.trim() || null);
+    onChange("");
   }
 
   async function startRecording() {
@@ -75,29 +84,41 @@ export default function ChatInput({ onSend, onSendVoice, disabled }) {
   }
 
   return (
-    <div className="border-t border-slate-200 p-3 dark:border-slate-800 sm:p-4">
+    <div className="px-3 pt-2 sm:px-4" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
       {micError && (
-        <p className="mx-auto mb-2 max-w-3xl text-xs text-red-600 dark:text-red-400">
-          {micError}
-        </p>
+        <p className="mx-auto mb-2 max-w-3xl text-xs text-danger">{micError}</p>
       )}
-      <div className="mx-auto flex max-w-3xl items-end gap-2">
+      <div className="mx-auto flex max-w-3xl items-end gap-1.5 rounded-3xl border border-border bg-raised p-1.5">
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleImagePicked}
+          className="hidden"
+        />
+        <button
+          onClick={() => imageInputRef.current?.click()}
+          disabled={disabled || recording}
+          title="Upload a screenshot or photo (e.g. Apple Health/Activity)"
+          aria-label="Upload an image"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-ink disabled:opacity-40 active:scale-95"
+        >
+          <Camera size={18} />
+        </button>
         <button
           onClick={toggleRecording}
           disabled={disabled}
           title={recording ? "Stop recording" : "Record a voice message"}
           aria-label={recording ? "Stop recording" : "Record a voice message"}
-          className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl border text-lg disabled:opacity-40 ${
-            recording
-              ? "animate-pulse border-red-300 bg-red-500 text-white dark:border-red-700"
-              : "border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full disabled:opacity-40 active:scale-95 ${
+            recording ? "animate-pulse bg-danger text-white" : "text-muted hover:bg-surface hover:text-ink"
           }`}
         >
-          {recording ? "⏹" : "🎤"}
+          {recording ? <Square size={16} /> : <Mic size={18} />}
         </button>
         <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -107,14 +128,15 @@ export default function ChatInput({ onSend, onSendVoice, disabled }) {
           rows={1}
           placeholder={recording ? "Recording…" : "Message LifeOS…"}
           disabled={recording}
-          className="max-h-40 flex-1 resize-none rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-slate-600 sm:text-sm"
+          className="max-h-40 flex-1 resize-none bg-transparent px-1 py-2 text-base text-ink placeholder:text-faint focus:outline-none disabled:opacity-60 sm:text-sm"
         />
         <button
           onClick={submit}
-          disabled={disabled || recording || !text.trim()}
-          className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900"
+          disabled={disabled || recording || !value.trim()}
+          aria-label="Send"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-white hover:bg-accent-strong disabled:opacity-40 active:scale-95"
         >
-          Send
+          <ArrowUp size={18} />
         </button>
       </div>
     </div>

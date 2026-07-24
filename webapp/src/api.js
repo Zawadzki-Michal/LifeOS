@@ -19,6 +19,25 @@ async function request(path, options = {}) {
   return res.json();
 }
 
+async function requestMultipart(path, form) {
+  // No Content-Type here — the browser sets the multipart boundary itself.
+  const res = await fetch(BASE + path, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  if (res.status === 401) {
+    const err = new Error("unauthorized");
+    err.status = 401;
+    throw err;
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `Request failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 export const api = {
   me: () => request("/auth/me"),
   logout: () => request("/auth/logout", { method: "POST" }),
@@ -38,24 +57,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ text }),
     }),
-  sendVoiceMessage: async (id, blob) => {
+  sendVoiceMessage: (id, blob) => {
     const form = new FormData();
     form.append("file", blob, "voice.webm");
-    // No Content-Type here — the browser sets the multipart boundary itself.
-    const res = await fetch(`${BASE}/sessions/${id}/voice-messages`, {
-      method: "POST",
-      credentials: "include",
-      body: form,
-    });
-    if (res.status === 401) {
-      const err = new Error("unauthorized");
-      err.status = 401;
-      throw err;
-    }
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `Request failed: ${res.status}`);
-    }
-    return res.json();
+    return requestMultipart(`/sessions/${id}/voice-messages`, form);
   },
+  sendImageMessage: (id, file, caption) => {
+    const form = new FormData();
+    form.append("file", file, file.name || "image.jpg");
+    if (caption) form.append("caption", caption);
+    return requestMultipart(`/sessions/${id}/image-messages`, form);
+  },
+  getOpenRouterUsage: () => request("/usage/openrouter"),
 };
