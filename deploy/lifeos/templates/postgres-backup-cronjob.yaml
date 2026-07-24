@@ -1,9 +1,15 @@
 # Daily pg_dump -Fc + prune of dumps older than retentionDays, onto a PVC
 # separate from postgres-data. Protects against logical corruption/bad
 # migrations, not physical disk failure (same disk either way) — the
-# offBox leg (gated by .Values.backup.offBox.enabled) copies each dump to
-# a WSL2 hostPath backed by the Windows-side GoogleDrive sync folder for
-# real off-disk protection. Trigger manually anytime with:
+# offBox leg (gated by .Values.backup.offBox.enabled) copies each dump
+# off-box for real off-disk protection, via one of two mechanisms
+# (.Values.backup.offBox.mode):
+#   hostPath (WSL2) — a hostPath volume backed by the Windows-side
+#     GoogleDrive-synced folder; the already-running GoogleDrive desktop
+#     client does the actual off-box upload.
+#   rclone (Oracle) — rclone copy to the real Google Drive API, since a
+#     hostPath into a Windows folder doesn't exist on a Linux cloud VM.
+# Trigger manually anytime with:
 #   kubectl create job --from=cronjob/postgres-backup postgres-backup-manual -n lifeos
 apiVersion: batch/v1
 kind: CronJob
@@ -20,7 +26,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: backup
-              image: {{ .Values.postgres.image }}
+              image: {{ .Values.backup.image }}
               env:
                 - name: PGPASSWORD
                   valueFrom:
@@ -39,6 +45,10 @@ spec:
                       key: POSTGRES_DB
                 - name: RETENTION_DAYS
                   value: {{ .Values.backup.retentionDays | quote }}
+                {{- if and .Values.backup.offBox.enabled (eq .Values.backup.offBox.mode "rclone") }}
+                - name: RCLONE_CONFIG
+                  value: /etc/rclone/rclone.conf
+                {{- end }}
               command:
                 - sh
                 - -c
@@ -48,7 +58,7 @@ spec:
                   pg_dump -Fc -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" > "/backups/lifeos-${ts}.dump"
                   echo "wrote /backups/lifeos-${ts}.dump"
                   find /backups -name 'lifeos-*.dump' -mtime "+${RETENTION_DAYS}" -delete
-                  {{- if .Values.backup.offBox.enabled }}
+                  {{- if and .Values.backup.offBox.enabled (eq .Values.backup.offBox.mode "hostPath") }}
                   if cp "/backups/lifeos-${ts}.dump" "/offbox/lifeos-${ts}.dump"; then
                     echo "copied to off-box GoogleDrive path"
                     find /offbox -name 'lifeos-*.dump' -mtime "+${RETENTION_DAYS}" -delete
@@ -56,20 +66,39 @@ spec:
                     echo "off-box copy failed (GoogleDrive path unavailable?) — continuing, local backup still succeeded" >&2
                   fi
                   {{- end }}
+                  {{- if and .Values.backup.offBox.enabled (eq .Values.backup.offBox.mode "rclone") }}
+                  if rclone copy "/backups/lifeos-${ts}.dump" "{{ .Values.backup.offBox.rcloneRemote }}/"; then
+                    echo "copied to off-box rclone remote {{ .Values.backup.offBox.rcloneRemote }}"
+                    rclone delete "{{ .Values.backup.offBox.rcloneRemote }}" --min-age "${RETENTION_DAYS}d" --include "lifeos-*.dump" \
+                      || echo "off-box retention prune failed — continuing, next run will retry" >&2
+                  else
+                    echo "off-box rclone copy failed (network/Drive API/config issue?) — continuing, local backup still succeeded" >&2
+                  fi
+                  {{- end }}
               volumeMounts:
                 - name: backup-data
                   mountPath: /backups
-                {{- if .Values.backup.offBox.enabled }}
+                {{- if and .Values.backup.offBox.enabled (eq .Values.backup.offBox.mode "hostPath") }}
                 - name: offbox-data
                   mountPath: /offbox
+                {{- end }}
+                {{- if and .Values.backup.offBox.enabled (eq .Values.backup.offBox.mode "rclone") }}
+                - name: rclone-config
+                  mountPath: /etc/rclone
+                  readOnly: true
                 {{- end }}
           volumes:
             - name: backup-data
               persistentVolumeClaim:
                 claimName: postgres-backup
-            {{- if .Values.backup.offBox.enabled }}
+            {{- if and .Values.backup.offBox.enabled (eq .Values.backup.offBox.mode "hostPath") }}
             - name: offbox-data
               hostPath:
                 path: {{ .Values.backup.offBox.hostPath | quote }}
                 type: DirectoryOrCreate
+            {{- end }}
+            {{- if and .Values.backup.offBox.enabled (eq .Values.backup.offBox.mode "rclone") }}
+            - name: rclone-config
+              secret:
+                secretName: {{ .Values.backup.offBox.secretName }}
             {{- end }}

@@ -7,6 +7,7 @@ on:
 
 env:
   GHCR_IMAGE: ghcr.io/zawadzki-michal/lifeos-app
+  GHCR_BACKUP_IMAGE: ghcr.io/zawadzki-michal/lifeos-backup
 
 jobs:
   test:
@@ -71,6 +72,13 @@ jobs:
           context: .
           push: true
           tags: ${{ env.GHCR_IMAGE }}:${{ steps.tag.outputs.image_tag }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/backup.Dockerfile
+          push: true
+          tags: ${{ env.GHCR_BACKUP_IMAGE }}:${{ steps.tag.outputs.image_tag }}
 
   deploy:
     needs: build-and-push

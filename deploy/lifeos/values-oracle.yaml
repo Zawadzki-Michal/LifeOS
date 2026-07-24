@@ -3,11 +3,11 @@
 # The WSL2 cluster keeps using plain values.yaml (ngrok, gateway-IP Ollama)
 # as its cold-standby rollback config until decommission (v3 plan, Phase 7).
 
-# No GHCR image yet (Phase 5 wires real CI/CD publishing) — until then this
-# inherits values.yaml's local-import image settings unchanged (same
-# docker save | ctr images import flow as the WSL2 cluster, just piped over
-# SSH to this node instead of through `wsl`). Bump values.yaml's image.tag
-# and re-import on every real deploy, same discipline as before.
+# App image comes from GHCR via terraform/main.tf's set{} overrides
+# (image.repository/tag/pullPolicy), not from this file — Terraform's
+# deploy path always pulls the registry, never the node's local containerd
+# store. Manual/local `helm upgrade` runs (no Terraform) still fall back to
+# values.yaml's local-import defaults for quick debugging.
 
 ngrok:
   enabled: false
@@ -29,13 +29,19 @@ ingress:
   clusterIssuer: "letsencrypt-prod"
   tlsSecretName: "lifeos-tls"
 
-# Off-box backup: the WSL2 GoogleDrive-hostPath trick doesn't exist on a
-# real Linux VM. Disabled until the rclone cutover (Phase 6) — local PVC
-# backups keep running regardless (backup.enabled isn't a real key, the
-# CronJob itself is unconditional; this only gates the off-box leg).
+# Off-box backup: real rclone -> Google Drive API off-box leg (the WSL2
+# hostPath/GoogleDrive-desktop-client trick has no equivalent on a bare
+# Linux VM — no desktop sync client running here). Requires the
+# rclone-config Secret to exist first (kubectl create secret generic
+# rclone-config -n lifeos --from-file=rclone.conf — see deploy/README.md's
+# one-time human OAuth step) — if it's ever deleted/rotated and this stays
+# enabled, the CronJob's rclone leg fails safely (best-effort, local backup
+# unaffected).
 backup:
   offBox:
-    enabled: false
+    enabled: true
+    mode: rclone
+    rcloneRemote: "gdrive:lifeos-backups"
 
 config:
   GOOGLE_OAUTH_REDIRECT_URI: "https://141-253-108-155.sslip.io/api/auth/callback"

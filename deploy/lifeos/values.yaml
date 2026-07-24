@@ -40,17 +40,37 @@ backup:
   # Separate PVC from postgres-data on purpose — protects against logical
   # corruption/bad migrations, NOT physical disk failure (same physical
   # disk either way). The offBox block below is the actual off-disk copy.
+  #
+  # pg_dump now lives here (deploy/backup.Dockerfile), not on postgres.image
+  # — that image never had rclone. Hand-pinned like postgres.image, not
+  # wired through Terraform's per-deploy overrides, since this image's
+  # contents change rarely. REPLACE_ME until the first CI build-and-push
+  # run pushes a real tag to ghcr.io/zawadzki-michal/lifeos-backup.
+  image: ghcr.io/zawadzki-michal/lifeos-backup:REPLACE_ME
   storageClassName: local-path
   storageSize: 10Gi
   schedule: "0 4 * * *" # 4am — clear of the scheduler's 7/8/21:00 windows
   retentionDays: 14
   offBox:
     enabled: true
+    # "hostPath" (WSL2 — GoogleDrive desktop-sync trick) or "rclone" (real
+    # Drive API, used on Oracle since a hostPath into a Windows folder
+    # doesn't exist on a Linux cloud VM). See values-oracle.yaml.
+    mode: hostPath
     # WSL2 DrvFs path to the Windows-side GoogleDrive-synced folder — the
     # already-running GoogleDrive desktop client is what actually gets this
     # off-box from here, no rclone/API credentials needed. Re-check this
-    # path if the WSL2 distro or Windows username ever changes.
+    # path if the WSL2 distro or Windows username ever changes. Unused
+    # while mode: rclone.
     hostPath: "/mnt/c/Users/mzzaw/Documents/GoogleDrive/lifeos-backups"
+    # rclone remote:path — the "gdrive" remote name must match exactly what
+    # was chosen during the one-time `rclone config` OAuth setup (see
+    # deploy/README.md). Unused while mode: hostPath.
+    rcloneRemote: "gdrive:lifeos-backups"
+    # Secret created once by hand via:
+    #   kubectl create secret generic rclone-config -n lifeos --from-file=rclone.conf
+    # never templated in this chart (same pattern as lifeos-secrets).
+    secretName: rclone-config
 
 redis:
   image: redis:7-alpine

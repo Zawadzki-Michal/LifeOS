@@ -581,3 +581,57 @@ script (`export PATH=/foo:$PATH`) undergoes word-splitting on those spaces
 and throws `syntax error near unexpected token '('`. Always quote it
 (`"$PATH"`), or better, write multi-step scripts to a file and `bash
 script.sh` rather than long inline `-c` one-liners.
+
+### Backups (rclone → Google Drive)
+
+The WSL2 hostPath/GoogleDrive-desktop-client trick (see the "Off-box copy"
+section above) has no equivalent on a bare Linux VM — no desktop sync
+client running here. `deploy/lifeos/templates/postgres-backup-cronjob.yaml`
+now supports two off-box mechanisms via `backup.offBox.mode`:
+`hostPath` (WSL2, unchanged) or `rclone` (Oracle, real Google Drive API).
+`deploy/backup.Dockerfile` (alpine + `postgresql16-client` + `rclone`,
+pushed to `ghcr.io/zawadzki-michal/lifeos-backup` by the same CI
+`build-and-push` job as the app image) replaces `postgres.image` as the
+CronJob's container — the pg_dump binary now lives there instead, since
+`postgres.image` never had rclone.
+
+**One-time `rclone config` OAuth setup — must be done by a human, not
+automatable**: run `rclone config` locally on Windows (not the headless
+Oracle VM — no browser there):
+```
+n                          # New remote
+name> gdrive                # must match backup.offBox.rcloneRemote exactly
+Storage> drive               # search/select Google Drive
+client_id>                   # blank — rclone's built-in shared credentials
+client_secret>               # blank
+scope> 2                     # drive.file — least-privilege, rclone only sees files it creates
+root_folder_id>              # blank
+service_account_file>        # blank
+Use auto config?> y          # opens your browser — log in as the Google account backups should land in, grant access
+Configure as Shared Drive?> n
+```
+Find the resulting file with `rclone config file` (Windows default:
+`%APPDATA%\rclone\rclone.conf`). Then create the K8s Secret (same
+"created once by hand, never templated" pattern as `lifeos-secrets`):
+```
+kubectl create secret generic rclone-config -n lifeos --from-file=rclone.conf=<path-to-rclone.conf>
+```
+
+**After the first CI run** that builds `deploy/backup.Dockerfile`: set the
+`lifeos-backup` GHCR package to public visibility (Settings → Packages →
+`lifeos-backup`), same one-time step `lifeos-app` needed — otherwise
+`imagePullPolicy` fails with `ImagePullBackOff` (no pull secret configured).
+Then bump `values.yaml`'s `backup.image` from the `REPLACE_ME` placeholder
+to the real pushed tag.
+
+**Verification** — same manual-trigger flow as the WSL2 hostPath leg:
+```
+kubectl create job --from=cronjob/postgres-backup postgres-backup-manual -n lifeos
+kubectl logs -n lifeos job/postgres-backup-manual   # confirm "copied to off-box rclone remote gdrive:lifeos-backups", not a failure line
+kubectl delete job -n lifeos postgres-backup-manual
+```
+**Not verified by the job itself** — same caveat as the hostPath leg,
+just via a different mechanism: confirm the file actually landed with
+`rclone lsf gdrive:lifeos-backups` (from a machine with the same
+`rclone.conf`) or the Drive web UI, not just that the CronJob logged
+success.
