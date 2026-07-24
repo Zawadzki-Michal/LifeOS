@@ -1,6 +1,6 @@
 # LifeOS Web App — Plan
 
-**Status:** Approved, not yet built. This doc is the design; update `02-PROGRESS.md` as pieces land, the same way the rest of the project tracks progress vs. plan.
+**Status:** Built. This doc is the original design as approved; treat it as historical context for *why* the app is shaped this way. For what's actually live today (vision, usage dashboard, the dark-only redesign, etc.), see `02-PROGRESS.md` §1.
 
 ## Why
 
@@ -82,7 +82,7 @@ React + Vite + Tailwind. Sidebar (session list, new-chat button, rename/delete) 
 | 4 | `/api/sessions*` endpoints, curl-tested | 1–2 days |
 | 5 | React/Vite SPA: login, session sidebar, chat thread | 4–6 days |
 | 6 | Adminer container + compose wiring + README update | <0.5 day |
-| Stretch | SSE/WebSocket streaming, auto-generated session titles, surfacing scheduler proactive-sends in the web feed | — |
+| Stretch | ~~SSE streaming~~ (done), auto-generated session titles (done), ~~surfacing scheduler proactive-sends in the web feed~~ (done) | — |
 
 Roughly 1.5–2 weeks part-time.
 
