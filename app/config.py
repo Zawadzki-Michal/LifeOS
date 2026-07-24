@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://host.docker.internal:11434"
     ollama_model: str = "qwen3.6:35b-a3b"
 
+    grafana_base_url: str = "http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local"
+
     openrouter_api_key: str = ""
     openrouter_model: str = "anthropic/claude-sonnet-5"
     openrouter_gpt_model: str = "openai/gpt-5"

@@ -1,0 +1,23 @@
+{{- if .Values.monitoring.enabled }}
+# `release: kube-prometheus-stack` label required — that Helm release's
+# Prometheus only discovers ServiceMonitors carrying its own release label
+# by default (serviceMonitorSelectorNilUsesHelmValues: true, the chart
+# default). This is a separate, independently-installed release from its
+# own upstream repo — see deploy/README.md's Phase 4 section — not part of
+# this chart.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: lifeos-app
+  labels:
+    release: kube-prometheus-stack
+    {{- include "lifeos.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: lifeos-app
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+{{- end }}

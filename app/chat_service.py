@@ -90,7 +90,7 @@ async def _run_remote_turn(session_id: int, channel: str, text: str, model: str 
     completion_tokens = None
     reply_model = model or settings.openrouter_model
     try:
-        result = await openrouter_client.chat(messages, model=model)
+        result = await openrouter_client.chat(messages, model=model, source="chat_cloud")
         reply = result["content"].strip()
         completion_tokens = result.get("completion_tokens")
         _log_interaction(

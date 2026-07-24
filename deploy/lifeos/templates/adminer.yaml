@@ -1,0 +1,42 @@
+{{- if .Values.adminer.enabled }}
+# ClusterIP only — no tunnel exposure, matching the compose setup's
+# 127.0.0.1-only binding. Reach it via:
+#   kubectl port-forward -n lifeos svc/adminer 8081:8080
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adminer
+  labels:
+    app: adminer
+    {{- include "lifeos.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: adminer
+  template:
+    metadata:
+      labels:
+        app: adminer
+    spec:
+      enableServiceLinks: false # see n8n-deployment.yaml for why
+      containers:
+        - name: adminer
+          image: {{ .Values.adminer.image }}
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: adminer
+  labels:
+    app: adminer
+    {{- include "lifeos.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: adminer
+  ports:
+    - port: 8080
+      targetPort: 8080
+{{- end }}

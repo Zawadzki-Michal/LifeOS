@@ -373,6 +373,23 @@ class InteractionLog(Base):
     redaction_applied: Mapped[str | None] = mapped_column(String(200))
 
 
+class OpenRouterUsageLog(Base):
+    """One row per OpenRouter call — feeds a spend-over-time Grafana panel
+    (see deploy/README.md Phase 4). Numeric(12,6), not the (12,2) used
+    elsewhere in this file: OpenRouter's per-call USD cost is routinely a
+    fraction of a cent, which (12,2) would round straight to 0.00."""
+
+    __tablename__ = "openrouter_usage_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    model: Mapped[str] = mapped_column(String(64))
+    source: Mapped[str] = mapped_column(String(32))  # chat_cloud|consult_advanced_model|analyze_image
+    cost: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer)
+
+
 # --- 7.12 System ---
 
 

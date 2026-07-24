@@ -1,4 +1,5 @@
 .env
+.env.k8s-secrets
 .git
 __pycache__
 *.pyc

@@ -1,0 +1,75 @@
+# Daily pg_dump -Fc + prune of dumps older than retentionDays, onto a PVC
+# separate from postgres-data. Protects against logical corruption/bad
+# migrations, not physical disk failure (same disk either way) — the
+# offBox leg (gated by .Values.backup.offBox.enabled) copies each dump to
+# a WSL2 hostPath backed by the Windows-side GoogleDrive sync folder for
+# real off-disk protection. Trigger manually anytime with:
+#   kubectl create job --from=cronjob/postgres-backup postgres-backup-manual -n lifeos
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  labels:
+    {{- include "lifeos.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: {{ .Values.postgres.image }}
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secretName }}
+                      key: POSTGRES_PASSWORD
+                - name: POSTGRES_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secretName }}
+                      key: POSTGRES_USER
+                - name: POSTGRES_DB
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secretName }}
+                      key: POSTGRES_DB
+                - name: RETENTION_DAYS
+                  value: {{ .Values.backup.retentionDays | quote }}
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  ts=$(date +%Y%m%d-%H%M%S)
+                  pg_dump -Fc -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" > "/backups/lifeos-${ts}.dump"
+                  echo "wrote /backups/lifeos-${ts}.dump"
+                  find /backups -name 'lifeos-*.dump' -mtime "+${RETENTION_DAYS}" -delete
+                  {{- if .Values.backup.offBox.enabled }}
+                  if cp "/backups/lifeos-${ts}.dump" "/offbox/lifeos-${ts}.dump"; then
+                    echo "copied to off-box GoogleDrive path"
+                    find /offbox -name 'lifeos-*.dump' -mtime "+${RETENTION_DAYS}" -delete
+                  else
+                    echo "off-box copy failed (GoogleDrive path unavailable?) — continuing, local backup still succeeded" >&2
+                  fi
+                  {{- end }}
+              volumeMounts:
+                - name: backup-data
+                  mountPath: /backups
+                {{- if .Values.backup.offBox.enabled }}
+                - name: offbox-data
+                  mountPath: /offbox
+                {{- end }}
+          volumes:
+            - name: backup-data
+              persistentVolumeClaim:
+                claimName: postgres-backup
+            {{- if .Values.backup.offBox.enabled }}
+            - name: offbox-data
+              hostPath:
+                path: {{ .Values.backup.offBox.hostPath | quote }}
+                type: DirectoryOrCreate
+            {{- end }}

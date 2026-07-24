@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: n8n
+  labels:
+    app: n8n
+    {{- include "lifeos.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # SQLite-backed — two pods can't share the same data dir
+  selector:
+    matchLabels:
+      app: n8n
+  template:
+    metadata:
+      labels:
+        app: n8n
+    spec:
+      # Kubernetes auto-injects legacy Docker-links-style env vars for every
+      # Service in the namespace (e.g. N8N_PORT=tcp://10.x.x.x:5678 for a
+      # Service literally named "n8n") — n8n's own app code reads N8N_PORT
+      # expecting a plain port number and crashes on the URL form. Disabling
+      # this (rarely-needed, DNS replaced it long ago) avoids the whole
+      # class of <SVC>_PORT / <SVC>_SERVICE_HOST collisions.
+      enableServiceLinks: false
+      containers:
+        - name: n8n
+          image: {{ .Values.n8n.image }}
+          ports:
+            - containerPort: 5678
+          env:
+            - name: N8N_BASIC_AUTH_ACTIVE
+              value: "true"
+            - name: N8N_BASIC_AUTH_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: lifeos-config
+                  key: N8N_BASIC_AUTH_USER
+            - name: N8N_BASIC_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: N8N_BASIC_AUTH_PASSWORD
+            - name: GENERIC_TIMEZONE
+              value: Europe/Warsaw
+          volumeMounts:
+            - name: n8n-data
+              mountPath: /home/node/.n8n
+          resources:
+            {{- toYaml .Values.n8n.resources | nindent 12 }}
+      volumes:
+        - name: n8n-data
+          persistentVolumeClaim:
+            claimName: n8n-data

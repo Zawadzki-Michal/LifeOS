@@ -1,0 +1,6 @@
+apiVersion: v2
+name: lifeos
+description: LifeOS personal assistant — self-hosted k3s deployment (Phase 1 - postgres/redis/app)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

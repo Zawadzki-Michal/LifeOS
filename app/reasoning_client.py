@@ -41,7 +41,8 @@ async def consult(question: str, context: str | None = None) -> tuple[str, int |
         [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
-        ]
+        ],
+        source="consult_advanced_model",
     )
     return result["content"], result.get("completion_tokens")
 
@@ -73,5 +74,6 @@ async def analyze_image(
             },
         ],
         model=settings.openrouter_vision_model,
+        source="analyze_image",
     )
     return result["content"], result.get("completion_tokens")
