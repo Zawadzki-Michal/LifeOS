@@ -13,9 +13,9 @@ const STATUS_LABELS = {
 };
 
 const SUGGESTED_PROMPTS = [
-  "What's on my calendar today?",
-  "Log a meal",
-  "How much did I spend this month?",
+  "Local: What's on my calendar today?",
+  "Local: Log a meal",
+  "Local: How much did I spend this month?",
   "Give me health advice",
 ];
 
@@ -76,6 +76,11 @@ export default function ChatThread({ messages, pending, pendingStatus, onPromptS
             </button>
           ))}
         </div>
+        <p className="max-w-sm text-xs text-faint">
+          Start a message with <span className="font-medium text-muted">Local:</span> for anything
+          that touches your data — calendar, expenses, meals, health. Everything else goes straight
+          to the cloud model for a faster reply.
+        </p>
       </div>
     );
   }

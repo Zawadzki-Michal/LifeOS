@@ -1,5 +1,5 @@
 import ReactMarkdown from "react-markdown";
-import { Cloud, Cpu, Image as ImageIcon, Volume2 } from "lucide-react";
+import { Cloud, Coins, Cpu, Image as ImageIcon, Volume2 } from "lucide-react";
 import { canSpeak, speak } from "../tts.js";
 
 // Which model actually produced this reply (app/chat_service.py /
@@ -10,6 +10,8 @@ function modelInfo(model) {
   if (!model) return null;
   if (model.startsWith("anthropic/")) return { label: "Sonnet", Icon: Cloud };
   if (model.startsWith("google/")) return { label: "Gemini", Icon: ImageIcon };
+  if (model === "openai/gpt-5-nano") return { label: "GPT-5 Nano", Icon: Coins };
+  if (model.startsWith("openai/")) return { label: "GPT-5", Icon: Cloud };
   return { label: "Local (Qwen)", Icon: Cpu };
 }
 
