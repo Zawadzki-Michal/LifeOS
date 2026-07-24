@@ -1,6 +1,19 @@
 """Tool definitions exposed to the local model via Ollama's tool-calling."""
 
-from app import calendar_client, finance_client, health_client, maps_client
+import logging
+
+from app import (
+    calendar_client,
+    finance_client,
+    health_client,
+    maps_client,
+    nutrition_client,
+    reasoning_client,
+    redis_client,
+)
+from app.ollama_client import TerminalToolResult
+
+logger = logging.getLogger("lifeos.tools")
 
 TOOLS = [
     {
@@ -514,11 +527,125 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "log_meal",
+            "description": (
+                "Log a meal the user describes. Estimate the calories and macros "
+                "yourself from the description (same way you'd reason about it if "
+                "asked directly) — there is no external nutrition lookup, your "
+                "estimate is what gets stored."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string", "description": "What was eaten, in the user's words."},
+                    "est_kcal": {"type": "integer", "description": "Your estimated calories for this meal."},
+                    "est_protein_g": {"type": "integer", "description": "Estimated protein in grams."},
+                    "est_carbs_g": {"type": "integer", "description": "Estimated carbs in grams."},
+                    "est_fat_g": {"type": "integer", "description": "Estimated fat in grams."},
+                    "meal_type": {
+                        "type": "string",
+                        "description": "'breakfast', 'lunch', 'dinner', or 'snack', if apparent.",
+                    },
+                },
+                "required": ["description", "est_kcal"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_daily_nutrition",
+            "description": (
+                "Get calories/protein logged so far today (or another date) against "
+                "the day's target, including how much budget remains. Use this before "
+                "proposing a meal so the proposal fits the user's remaining calories."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date_iso": {
+                        "type": "string",
+                        "description": "Optional date (YYYY-MM-DD). Defaults to today.",
+                    }
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_daily_target",
+            "description": "Set the user's calorie target for a day (defaults to today).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kcal": {"type": "integer", "description": "Daily calorie target."},
+                    "date_iso": {
+                        "type": "string",
+                        "description": "Optional date (YYYY-MM-DD). Defaults to today.",
+                    },
+                },
+                "required": ["kcal"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consult_advanced_model",
+            "description": (
+                "Hand off to a more capable cloud model for open-ended requests that "
+                "need real synthesis, planning, or advice rather than a data lookup or "
+                "action — e.g. 'what should I cook with chicken, rice, and broccoli, "
+                "I have about 600kcal left today', 'review my activity and weight this "
+                "week and give me advice', or any other 'what should I do about X' "
+                "question. Do NOT use this for straightforward data operations you "
+                "already have a tool for (logging/querying expenses, calendar, meals, "
+                "health data) — handle those yourself directly without this tool. "
+                "Gather any relevant numbers first via your other tools (e.g. "
+                "get_daily_nutrition for remaining calories, get_health_summary for "
+                "activity/sleep, or the latest weight) and pass them in `context` so "
+                "the answer is grounded in real data instead of guessing."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The user's open-ended question or request, restated clearly.",
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": (
+                            "Relevant data you already gathered from other tools this "
+                            "turn (e.g. remaining calorie budget, recent workouts, "
+                            "latest weight) to ground the answer in real numbers."
+                        ),
+                    },
+                },
+                "required": ["question"],
+            },
+        },
+    },
 ]
 
 
-def make_executor(chat_id: int):
-    async def execute(name: str, args: dict) -> str:
+def make_executor(chat_id: int, usage: dict | None = None, status_session_id: int | None = None):
+    """`usage`, if given, is a mutable dict the executor records activity
+    into: cloud_used/cloud_tokens (read by chat_service.py to populate
+    InteractionLog), and tool_calls — every tool actually invoked this turn
+    (name + args), a real audit trail persisted to chat_message.tool_calls_json.
+    Added after a live incident where the local model described creating
+    five calendar events it never actually called the tool for — this makes
+    "did it really do that" a lookup instead of a manual calendar-API check.
+    `status_session_id`, if given, gets a "thinking_cloud" live status ping
+    (app.redis_client) right before the OpenRouter call, so the webapp UI can
+    show it's not just the slow local model still working."""
+
+    async def _dispatch(name: str, args: dict) -> str:
         if name == "get_driving_directions":
             return await maps_client.get_driving_directions(chat_id, args["destination"])
         if name == "get_train_departures":
@@ -608,6 +735,40 @@ def make_executor(chat_id: int):
             return await finance_client.delete_bill(args.get("name"), args.get("bill_id"))
         if name == "get_health_summary":
             return await health_client.get_health_summary(args.get("period", "week"))
+        if name == "log_meal":
+            return await nutrition_client.log_meal(
+                args["description"],
+                args["est_kcal"],
+                args.get("est_protein_g"),
+                args.get("est_carbs_g"),
+                args.get("est_fat_g"),
+                args.get("meal_type"),
+            )
+        if name == "get_daily_nutrition":
+            return await nutrition_client.get_daily_nutrition(args.get("date_iso"))
+        if name == "set_daily_target":
+            return await nutrition_client.set_daily_target(args["kcal"], args.get("date_iso"))
+        if name == "consult_advanced_model":
+            if status_session_id is not None:
+                try:
+                    await redis_client.publish_status_event(status_session_id, "thinking_cloud")
+                except Exception:
+                    logger.exception("Failed to publish live status event")
+            reply, tokens = await reasoning_client.consult(args["question"], args.get("context"))
+            if usage is not None:
+                usage["cloud_used"] = True
+                usage["cloud_tokens"] = (usage.get("cloud_tokens") or 0) + (tokens or 0)
+            # Terminal: return the cloud model's answer directly as this
+            # turn's final reply rather than looping back to Qwen to relay
+            # it — that extra round-trip was consistently the slowest step
+            # and risked altering (once, mistranslating) the cloud answer.
+            return TerminalToolResult(reply)
         return f"Unknown tool: {name}"
+
+    async def execute(name: str, args: dict) -> str:
+        result = await _dispatch(name, args)
+        if usage is not None:
+            usage.setdefault("tool_calls", []).append({"name": name, "args": args})
+        return result
 
     return execute

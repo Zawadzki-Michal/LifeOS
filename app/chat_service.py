@@ -6,7 +6,7 @@ app's chat API so the two surfaces can't drift apart.
 import datetime as dt
 import logging
 
-from app import chat_store, ollama_client
+from app import chat_store, ollama_client, redis_client
 from app.config import settings
 from app.db import SessionLocal
 from app.models import InteractionLog
@@ -19,7 +19,13 @@ FALLBACK_REPLY = "Sorry, I didn't get a usable response that time — try rephra
 ERROR_REPLY = "Sorry, the local model didn't respond — check the Ollama connection."
 
 
-def _log_interaction(channel: str, direction: str, tokens: int | None) -> None:
+def _log_interaction(
+    channel: str,
+    direction: str,
+    tokens: int | None,
+    tokens_cloud: int | None = None,
+    redaction_applied: str = "n/a (local-only)",
+) -> None:
     with SessionLocal() as db:
         db.add(
             InteractionLog(
@@ -28,8 +34,8 @@ def _log_interaction(channel: str, direction: str, tokens: int | None) -> None:
                 channel=channel,
                 agent="chat",
                 tokens_local=tokens,
-                tokens_cloud=None,
-                redaction_applied="n/a (local-only)",
+                tokens_cloud=tokens_cloud,
+                redaction_applied=redaction_applied,
             )
         )
         db.commit()
@@ -38,6 +44,15 @@ def _log_interaction(channel: str, direction: str, tokens: int | None) -> None:
 def _build_system_prompt(channel: str, terse: bool) -> str:
     with SessionLocal() as db:
         return system_prompt(db, channel, terse=terse)
+
+
+async def _publish_status(session_id: int, status: str) -> None:
+    """Best-effort live "what's happening" ping for the webapp UI — a Redis
+    outage must never break the actual chat turn over a nice-to-have."""
+    try:
+        await redis_client.publish_status_event(session_id, status)
+    except Exception:
+        logger.exception("Failed to publish live status event")
 
 
 async def run_turn(
@@ -59,15 +74,39 @@ async def run_turn(
         + [{"role": "user", "content": text}]
     )
 
+    # Live status pings (transcribing/thinking_local/thinking_cloud) are only
+    # meaningful to the webapp UI — Telegram has nowhere to show them.
+    status_session_id = session_id if channel == "web" else None
+    if status_session_id is not None:
+        await _publish_status(status_session_id, "thinking_local")
+
     completion_tokens = None
+    usage: dict = {}
+    reply_model: str | None = None
     try:
         result = await ollama_client.chat_with_tools(
-            settings.ollama_model, messages, TOOLS, make_executor(context_id)
+            settings.ollama_model,
+            messages,
+            TOOLS,
+            make_executor(context_id, usage, status_session_id=status_session_id),
         )
         reply = result["content"].strip()
+        # interaction_log always reflects real local Ollama spend for this
+        # turn; the persisted chat_message's token count/model instead
+        # reflect the cloud completion when that's what the reply actually
+        # is (the terminal consult_advanced_model path — see TerminalToolResult).
         completion_tokens = result["completion_tokens"]
+        reply_model = settings.openrouter_model if usage.get("cloud_used") else settings.ollama_model
         _log_interaction(channel, "in", result["prompt_tokens"])
-        _log_interaction(channel, "out", result["completion_tokens"])
+        _log_interaction(
+            channel,
+            "out",
+            result["completion_tokens"],
+            tokens_cloud=usage.get("cloud_tokens"),
+            redaction_applied="yes" if usage.get("cloud_used") else "n/a (local-only)",
+        )
+        if usage.get("cloud_used"):
+            completion_tokens = usage.get("cloud_tokens")
     except Exception:
         logger.exception("Ollama call failed")
         reply = ERROR_REPLY
@@ -78,5 +117,12 @@ async def run_turn(
         reply = FALLBACK_REPLY
 
     chat_store.append_message(session_id, "user", text)
-    chat_store.append_message(session_id, "assistant", reply, tokens=completion_tokens)
+    chat_store.append_message(
+        session_id,
+        "assistant",
+        reply,
+        tokens=completion_tokens,
+        tool_calls=usage.get("tool_calls"),
+        model=reply_model,
+    )
     return reply

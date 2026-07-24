@@ -1,9 +1,14 @@
+import base64
+import datetime as dt
 import tempfile
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
-from app import chat_service, chat_store, speech
+from app import chat_service, chat_store, reasoning_client, redis_client, speech
 from app.auth import require_auth
+from app.config import settings
+from app.db import SessionLocal
+from app.models import InteractionLog
 
 router = APIRouter(prefix="/api/sessions", dependencies=[Depends(require_auth)])
 
@@ -25,6 +30,7 @@ def _session_dict(session) -> dict:
         "created_at": session.created_at.isoformat(),
         "updated_at": session.updated_at.isoformat(),
         "archived": session.archived,
+        "is_scheduler": session.is_scheduler,
     }
 
 
@@ -34,6 +40,7 @@ def _message_dict(message) -> dict:
         "role": message.role,
         "content": message.content,
         "created_at": message.created_at.isoformat(),
+        "model": message.model,
     }
 
 
@@ -107,6 +114,11 @@ async def send_message(session_id: int, request: Request):
 async def send_voice_message(session_id: int, file: UploadFile = File(...)):
     session = _get_web_session_or_404(session_id)
 
+    try:
+        await redis_client.publish_status_event(session_id, "transcribing")
+    except Exception:
+        pass
+
     with tempfile.NamedTemporaryFile(suffix=".audio") as tmp:
         tmp.write(await file.read())
         tmp.flush()
@@ -117,3 +129,60 @@ async def send_voice_message(session_id: int, file: UploadFile = File(...)):
 
     reply = await _send_text(session_id, session, transcript, terse=True)
     return {"transcript": transcript, "reply": reply}
+
+
+@router.post("/{session_id}/image-messages")
+async def send_image_message(
+    session_id: int, file: UploadFile = File(...), caption: str | None = Form(None)
+):
+    """Images can't go through the normal local-Qwen tool-calling path — the
+    local model isn't vision-capable — so this hands off to a cheap vision
+    model (settings.openrouter_vision_model) directly. The caption is
+    redacted like any other outbound text; the image itself cannot be —
+    an explicit, accepted tradeoff (see conversation/03-WEBAPP-PLAN.md)."""
+    session = _get_web_session_or_404(session_id)
+
+    try:
+        await redis_client.publish_status_event(session_id, "analyzing_image")
+    except Exception:
+        pass
+
+    image_bytes = await file.read()
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="Empty image upload")
+
+    mime_type = file.content_type or "image/jpeg"
+    image_b64 = base64.b64encode(image_bytes).decode("ascii")
+    caption = (caption or "").strip() or None
+
+    reply, tokens = await reasoning_client.analyze_image(image_b64, mime_type, caption)
+
+    user_content = f"📷 {caption}" if caption else "📷 [obraz]"
+    if session.title is None:
+        preview = (
+            user_content
+            if len(user_content) <= TITLE_PREVIEW_LEN
+            else user_content[: TITLE_PREVIEW_LEN - 1] + "…"
+        )
+        chat_store.update_session(session_id, title=preview)
+
+    chat_store.append_message(session_id, "user", user_content)
+    chat_store.append_message(
+        session_id, "assistant", reply, tokens=tokens, model=settings.openrouter_vision_model
+    )
+
+    with SessionLocal() as db:
+        db.add(
+            InteractionLog(
+                ts=dt.datetime.now(dt.timezone.utc),
+                direction="out",
+                channel="web",
+                agent="vision",
+                tokens_local=None,
+                tokens_cloud=tokens,
+                redaction_applied="yes (caption only — image not redactable)",
+            )
+        )
+        db.commit()
+
+    return {"reply": reply}

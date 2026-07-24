@@ -36,6 +36,32 @@ def get_or_create_telegram_session() -> ChatSession:
         return session
 
 
+def get_or_create_scheduler_session() -> ChatSession:
+    """One persistent web-channel session that proactive scheduler messages
+    (morning/evening briefs, bill reminders) are mirrored into, so they also
+    show up in the web app in real time — not just Telegram."""
+    with SessionLocal() as db:
+        session = (
+            db.query(ChatSession)
+            .filter(ChatSession.channel == "web", ChatSession.is_scheduler.is_(True))
+            .first()
+        )
+        if session is None:
+            now = _now()
+            session = ChatSession(
+                channel="web",
+                title="Daily Briefings",
+                created_at=now,
+                updated_at=now,
+                archived=False,
+                is_scheduler=True,
+            )
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+        return session
+
+
 def get_recent_messages(session_id: int, max_turns: int = MAX_TURNS) -> list[dict]:
     with SessionLocal() as db:
         rows = (
@@ -49,21 +75,39 @@ def get_recent_messages(session_id: int, max_turns: int = MAX_TURNS) -> list[dic
     return [{"role": row.role, "content": row.content} for row in rows]
 
 
-def append_message(session_id: int, role: str, content: str, tokens: int | None = None) -> None:
+def append_message(
+    session_id: int,
+    role: str,
+    content: str,
+    tokens: int | None = None,
+    tool_calls: list[dict] | None = None,
+    model: str | None = None,
+) -> ChatMessage:
+    """`tool_calls`, if given, is a real audit trail of what actually ran
+    this turn (name + args per tool) — not what the reply claims happened.
+    Added after a live incident where the local model confidently described
+    creating five calendar events it never actually called the tool for.
+    `model`, for assistant replies, is which model actually produced the
+    content (e.g. 'qwen3.6:35b-a3b', 'anthropic/claude-sonnet-5',
+    'google/gemini-2.5-flash') — surfaced in the webapp so it's visible at a
+    glance whether a reply came from the local or cloud model."""
     with SessionLocal() as db:
-        db.add(
-            ChatMessage(
-                session_id=session_id,
-                role=role,
-                content=content,
-                tokens=tokens,
-                created_at=_now(),
-            )
+        message = ChatMessage(
+            session_id=session_id,
+            role=role,
+            content=content,
+            tokens=tokens,
+            tool_calls_json=tool_calls,
+            model=model,
+            created_at=_now(),
         )
+        db.add(message)
         db.query(ChatSession).filter(ChatSession.id == session_id).update(
             {"updated_at": _now()}
         )
         db.commit()
+        db.refresh(message)
+        return message
 
 
 def clear_session_messages(session_id: int) -> None:
