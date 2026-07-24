@@ -44,9 +44,9 @@ backup:
   # pg_dump now lives here (deploy/backup.Dockerfile), not on postgres.image
   # — that image never had rclone. Hand-pinned like postgres.image, not
   # wired through Terraform's per-deploy overrides, since this image's
-  # contents change rarely. REPLACE_ME until the first CI build-and-push
-  # run pushes a real tag to ghcr.io/zawadzki-michal/lifeos-backup.
-  image: ghcr.io/zawadzki-michal/lifeos-backup:REPLACE_ME
+  # contents change rarely — bump by hand after a deploy/backup.Dockerfile
+  # change lands in GHCR, same discipline as postgres.image.
+  image: ghcr.io/zawadzki-michal/lifeos-backup:9d74c2d791b0
   storageClassName: local-path
   storageSize: 10Gi
   schedule: "0 4 * * *" # 4am — clear of the scheduler's 7/8/21:00 windows
