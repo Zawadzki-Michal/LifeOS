@@ -1,14 +1,22 @@
-# LifeOS on k3s — Phase 1 (postgres, redis, app)
+# LifeOS deployment runbook
 
-Deployment target: a dedicated WSL2 distro (`Ubuntu-24.04`) running k3s,
-separate from Docker Desktop's own WSL usage. docker-compose remains the
-local dev workflow unchanged — this is only the always-on deployment target.
-Full rationale and phased plan: see the approved plan doc (ask if you need
-the path again).
+**Current production**: the **Oracle Cloud cluster** (`141.253.108.155`,
+`https://141-253-108-155.sslip.io`) — real traffic, real data, Terraform-
+managed, full CI/CD (push to `master` auto-builds/deploys). See
+**"v3 — Oracle Cloud cluster"** below for everything specific to it
+(Terraform, CI/CD, Tailscale, rclone backups).
 
-Current state on this machine: bootstrapped and verified working (see
-below) — node `yogi`, k3s v1.36.2+k3s1, Ollama reconfigured to listen on
-`0.0.0.0:11434`.
+**Cold-standby**: the original **WSL2 cluster** (this Windows machine,
+`Ubuntu-24.04` distro) — kept running deliberately, not decommissioned yet,
+as a rollback point while the Oracle cluster proves itself over time. Real
+traffic was cut over away from it (Telegram webhook, Google OAuth) but its
+own data/services still run. The rest of this document (everything before
+the "v3" section) is its setup history and remains accurate for it.
+
+docker-compose remains the local dev workflow on both — this is only ever
+the always-on deployment target, never touched for day-to-day development.
+
+## One-time cluster bootstrap (already done on this machine — WSL2)
 
 ## One-time cluster bootstrap (already done on this machine)
 
