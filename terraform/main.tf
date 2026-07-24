@@ -83,4 +83,12 @@ resource "helm_release" "kube_prometheus_stack" {
     file("${path.module}/../deploy/kube-prometheus-stack-values.yaml"),
     file("${path.module}/../deploy/kube-prometheus-stack-values-oracle.yaml"),
   ]
+
+  # Grafana's grafana-lifeos-pg Secret + the grafana_ro Postgres role don't
+  # exist on this cluster yet (created once by hand, same pattern as
+  # lifeos-secrets — see deploy/README.md's Phase 4 section) — until they
+  # do, Grafana crash-loops waiting on that secretKeyRef. wait = false so
+  # that doesn't fail the whole apply; flip back to the default (true) once
+  # the prerequisite is set up here too.
+  wait = false
 }

@@ -95,6 +95,12 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.TF_STATE_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_STATE_SECRET_KEY }}
+          # OCI's S3-compatible API doesn't support AWS SDK v2's chunked
+          # checksum-trailer uploads ("NotImplemented: AWS chunked encoding
+          # not supported") — backend.tf's skip_s3_checksum handles this too,
+          # belt-and-braces since this was needed locally either way.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
         run: terraform init
 
       - name: Terraform apply
@@ -102,9 +108,11 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.TF_STATE_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_STATE_SECRET_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
         run: |
           terraform apply -auto-approve \
-            -var "kube_host=${{ secrets.KUBE_API_SERVER }}" \
+            -var "kube_host=${{ vars.KUBE_API_SERVER }}" \
             -var "kube_token=${{ secrets.KUBE_TOKEN }}" \
             -var "kube_cluster_ca_certificate=${{ secrets.KUBE_CA_CERT }}" \
             -var "image_tag=${{ needs.build-and-push.outputs.image_tag }}"
@@ -117,7 +125,7 @@ jobs:
           clusters:
             - name: lifeos-oracle
               cluster:
-                server: ${{ secrets.KUBE_API_SERVER }}
+                server: ${{ vars.KUBE_API_SERVER }}
                 certificate-authority-data: ${{ secrets.KUBE_CA_CERT }}
           contexts:
             - name: lifeos-oracle
