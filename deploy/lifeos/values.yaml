@@ -82,6 +82,16 @@ ngrok:
   enabled: true
   image: ngrok/ngrok:latest
 
+# Disabled by default so it's inert on the existing WSL2/ngrok deployment —
+# the Oracle cluster enables this via values-oracle.yaml. See
+# deploy/README.md's v3 section for the ngrok -> Ingress+cert-manager
+# migration.
+ingress:
+  enabled: false
+  host: ""
+  clusterIssuer: "letsencrypt-prod"
+  tlsSecretName: "lifeos-tls"
+
 monitoring:
   # Requires the separate kube-prometheus-stack release (deploy/README.md
   # Phase 4) to be installed first — its ServiceMonitor CRD must exist.
@@ -111,6 +121,7 @@ config:
 # represents the Windows host (Ollama runs natively there, not in-cluster).
 # Find it from inside the WSL2 distro: `ip route show | grep default`.
 ollama:
+  serviceEnabled: true
   # WSL2 default-route gateway IP (== the Windows host as seen from pods).
   # Re-check with `ip route show | grep default` inside the k3s WSL2 distro
   # if Ollama connectivity ever breaks (e.g. after a Windows update resets

@@ -1,0 +1,10 @@
+# Oracle cluster override for kube-prometheus-stack-values.yaml's hardcoded
+# ngrok domain — same "hardcoded, not %(protocol)s/%(domain)s placeholders"
+# reasoning as the base file (those placeholders resolved to Grafana's
+# internal default instead of the real public domain). Applied on top via:
+#   -f deploy/kube-prometheus-stack-values.yaml -f deploy/kube-prometheus-stack-values-oracle.yaml
+grafana:
+  grafana.ini:
+    server:
+      domain: "141-253-108-155.sslip.io"
+      root_url: "https://141-253-108-155.sslip.io/api/grafana/"

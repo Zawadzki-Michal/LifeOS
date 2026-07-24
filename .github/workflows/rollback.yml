@@ -1,0 +1,79 @@
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "GHCR image tag to roll back to (e.g. a previous commit's short SHA)"
+        required: true
+        type: string
+
+env:
+  GHCR_IMAGE: ghcr.io/zawadzki-michal/lifeos-app
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    # Same guard as the main deploy job — never let a rollback race a
+    # regular deploy against the lock-less OCI state backend.
+    concurrency:
+      group: lifeos-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Terraform init
+        working-directory: terraform
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.TF_STATE_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_STATE_SECRET_KEY }}
+        run: terraform init
+
+      - name: Terraform apply (previous image tag)
+        working-directory: terraform
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.TF_STATE_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_STATE_SECRET_KEY }}
+        run: |
+          terraform apply -auto-approve \
+            -var "kube_host=${{ secrets.KUBE_API_SERVER }}" \
+            -var "kube_token=${{ secrets.KUBE_TOKEN }}" \
+            -var "kube_cluster_ca_certificate=${{ secrets.KUBE_CA_CERT }}" \
+            -var "image_tag=${{ inputs.image_tag }}"
+
+      - name: Build runtime kubeconfig
+        run: |
+          cat > kubeconfig.yaml <<EOF
+          apiVersion: v1
+          kind: Config
+          clusters:
+            - name: lifeos-oracle
+              cluster:
+                server: ${{ secrets.KUBE_API_SERVER }}
+                certificate-authority-data: ${{ secrets.KUBE_CA_CERT }}
+          contexts:
+            - name: lifeos-oracle
+              context:
+                cluster: lifeos-oracle
+                namespace: lifeos
+                user: lifeos-deployer
+          current-context: lifeos-oracle
+          users:
+            - name: lifeos-deployer
+              user:
+                token: ${{ secrets.KUBE_TOKEN }}
+          EOF
+          echo "KUBECONFIG=$PWD/kubeconfig.yaml" >> "$GITHUB_ENV"
+
+      - name: Force rollout to the rolled-back image
+        run: |
+          # No migration re-run here — rollback assumes the previous image's
+          # code is compatible with the current (already-migrated-forward)
+          # schema, same "migrations are additive/backward-compatible"
+          # assumption alembic-by-hand already relies on elsewhere.
+          kubectl delete pod -n lifeos -l app=lifeos-app --ignore-not-found
+          kubectl rollout status deployment/lifeos-app -n lifeos --timeout=120s

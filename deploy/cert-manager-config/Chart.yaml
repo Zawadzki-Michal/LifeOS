@@ -1,0 +1,9 @@
+apiVersion: v2
+name: cert-manager-config
+description: >
+  ClusterIssuers for Let's Encrypt (staging + prod), separate from the
+  cert-manager Helm release itself (which only installs the controller +
+  CRDs). Kept as its own tiny chart rather than a kubernetes_manifest
+  resource in Terraform, so the app/monitoring Terraform stack never needs
+  the kubernetes provider — see deploy/README.md's v3 section.
+version: 0.1.0

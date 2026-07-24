@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (gitignored) and fill in real values.
+# kube_host: the Oracle VM's public IP, port 6443.
+# kube_token / kube_cluster_ca_certificate: from the lifeos-deployer-token
+# Secret (deploy/lifeos-deployer-rbac.yaml) — see deploy/README.md's
+# Terraform section for the exact kubectl commands to extract them.
+
+kube_host                   = "https://REPLACE_ME:6443"
+kube_token                  = "REPLACE_ME"
+kube_cluster_ca_certificate = "REPLACE_ME"

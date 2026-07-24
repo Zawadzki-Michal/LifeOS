@@ -5,6 +5,9 @@ on:
     branches: [master]
   pull_request:
 
+env:
+  GHCR_IMAGE: ghcr.io/zawadzki-michal/lifeos-app
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -41,3 +44,105 @@ jobs:
           TEST_DATABASE_URL: postgresql+psycopg://lifeos:changeme@localhost:5432/lifeos_test
           REDIS_URL: redis://localhost:6379/0
         run: pytest -v
+
+  build-and-push:
+    needs: test
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.tag.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: tag
+        run: echo "image_tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.GHCR_IMAGE }}:${{ steps.tag.outputs.image_tag }}
+
+  deploy:
+    needs: build-and-push
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # The OCI Object Storage Terraform backend has no native state locking —
+    # this is what actually prevents two applies from racing each other.
+    # cancel-in-progress: false so a deploy already running always finishes
+    # rather than being killed mid-apply.
+    concurrency:
+      group: lifeos-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Terraform init
+        working-directory: terraform
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.TF_STATE_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_STATE_SECRET_KEY }}
+        run: terraform init
+
+      - name: Terraform apply
+        working-directory: terraform
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.TF_STATE_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_STATE_SECRET_KEY }}
+        run: |
+          terraform apply -auto-approve \
+            -var "kube_host=${{ secrets.KUBE_API_SERVER }}" \
+            -var "kube_token=${{ secrets.KUBE_TOKEN }}" \
+            -var "kube_cluster_ca_certificate=${{ secrets.KUBE_CA_CERT }}" \
+            -var "image_tag=${{ needs.build-and-push.outputs.image_tag }}"
+
+      - name: Build runtime kubeconfig
+        run: |
+          cat > kubeconfig.yaml <<EOF
+          apiVersion: v1
+          kind: Config
+          clusters:
+            - name: lifeos-oracle
+              cluster:
+                server: ${{ secrets.KUBE_API_SERVER }}
+                certificate-authority-data: ${{ secrets.KUBE_CA_CERT }}
+          contexts:
+            - name: lifeos-oracle
+              context:
+                cluster: lifeos-oracle
+                namespace: lifeos
+                user: lifeos-deployer
+          current-context: lifeos-oracle
+          users:
+            - name: lifeos-deployer
+              user:
+                token: ${{ secrets.KUBE_TOKEN }}
+          EOF
+          echo "KUBECONFIG=$PWD/kubeconfig.yaml" >> "$GITHUB_ENV"
+
+      - name: Run migrations and roll out
+        run: |
+          kubectl delete job lifeos-migrate-manual -n lifeos --ignore-not-found
+          kubectl create job --from=cronjob/lifeos-migrate lifeos-migrate-manual -n lifeos
+          kubectl wait --for=condition=complete job/lifeos-migrate-manual -n lifeos --timeout=120s
+          kubectl logs -n lifeos job/lifeos-migrate-manual
+          kubectl delete job lifeos-migrate-manual -n lifeos
+          # helm_release set wait=false above, so the app pod may already be
+          # crash-looping against the pre-migration schema — force a fresh
+          # pod so it picks up the now-migrated database immediately instead
+          # of waiting out CrashLoopBackOff's exponential backoff.
+          kubectl delete pod -n lifeos -l app=lifeos-app --ignore-not-found
+          kubectl rollout status deployment/lifeos-app -n lifeos --timeout=120s

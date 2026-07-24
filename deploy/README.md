@@ -376,3 +376,208 @@ kubectl get secret -n monitoring kube-prometheus-stack-grafana -o jsonpath="{.da
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3000:80   # then http://localhost:3000, user "admin"
 ```
 No account, no signup — entirely self-hosted inside the cluster.
+
+## v3 — Oracle Cloud cluster (done on 141.253.108.155)
+
+Same chart, second cluster: a `VM.Standard.E3.Flex` (2 OCPU/16GB, Ubuntu
+24.04) — E4.Flex wasn't available in this tenancy/region, E3 is the direct
+equivalent at the same per-OCPU/GB price. WSL2 stays up as a cold-standby
+rollback point until the full decommission (see the plan's Phase 7). Bare
+k3s bootstrap (Traefik **enabled** this time — no ngrok, real Ingress
+instead):
+```bash
+ssh -i ~/.ssh/lifeos_oracle ubuntu@<vm-ip> "curl -sfL https://get.k3s.io | sudo sh -"
+```
+**Two firewall layers, both need opening for 80/443/6443** — the OCI
+Security List (console) *and* the OS's own iptables (Oracle's Ubuntu images
+ship a default-REJECT INPUT chain independent of the Security List):
+```bash
+ssh -i ~/.ssh/lifeos_oracle ubuntu@<vm-ip> 'sudo iptables -I INPUT 5 -p tcp -m state --state NEW -m tcp --dport 80 -j ACCEPT; sudo iptables -I INPUT 6 -p tcp -m state --state NEW -m tcp --dport 443 -j ACCEPT; sudo iptables -I INPUT 7 -p tcp -m state --state NEW -m tcp --dport 6443 -j ACCEPT; sudo netfilter-persistent save'
+```
+k3s's self-signed serving cert doesn't include the public IP as a SAN by
+default — `kubectl` from outside the node fails TLS verification until you
+add it and restart:
+```bash
+ssh -i ~/.ssh/lifeos_oracle ubuntu@<vm-ip> 'printf "tls-san:\n  - <vm-ip>\n" | sudo tee /etc/rancher/k3s/config.yaml && sudo systemctl restart k3s'
+```
+Kubeconfig: same `/etc/rancher/k3s/k3s.yaml` pull as WSL2, `server:` rewritten
+to the public IP instead of `127.0.0.1` — saved separately as
+`~/.kube/oracle-config` (Windows path `C:\Users\<you>\.kube\oracle-config`)
+rather than overwriting the WSL2 default, so both clusters stay reachable:
+`KUBECONFIG=<path> kubectl ...`.
+
+**Image delivery**: no registry yet either (Phase 5 below adds GHCR) — same
+`docker save | ctr images import -` as WSL2, just piped over SSH to the
+remote node instead of through `wsl`:
+```bash
+docker save lifeos-app:<tag> | ssh -i ~/.ssh/lifeos_oracle ubuntu@<vm-ip> "sudo k3s ctr images import -"
+```
+
+**cert-manager + Ingress + TLS**: installed via `helm` from inside the WSL2
+distro (it already has `helm`; Windows-side doesn't), pointed at the Oracle
+kubeconfig via `KUBECONFIG=/mnt/c/Users/<you>/.kube/oracle-config`:
+```bash
+helm repo add jetstack https://charts.jetstack.io
+helm install cert-manager jetstack/cert-manager -n cert-manager --create-namespace --set crds.enabled=true
+helm upgrade --install cert-manager-config ./deploy/cert-manager-config
+```
+`deploy/lifeos/values-oracle.yaml` layers on top of `values.yaml` (`-f
+values.yaml -f values-oracle.yaml`) for everything Oracle-specific: ingress
+host/issuer, Ollama's Tailscale address, no local ollama Service.
+
+**DNS**: `anna-zawadzka.pl`'s DNS is managed through a Getspace hosting
+panel whose zone editor doesn't actually publish to its own authoritative
+nameservers (`ns3`/`ns4.getspace.us`) — confirmed two ways: the apex record
+it displays doesn't match what's live, and a brand-new disposable test
+record never appeared either after "publishing." Not a propagation delay, a
+broken panel — worth a support ticket with them separately. **Settled
+permanently on `sslip.io`** instead (`141-253-108-155.sslip.io` resolves to
+that literal IP automatically, no account/setup, a real public DNS record so
+Let's Encrypt's HTTP-01 challenge works exactly like a normal domain) —
+baked into `values-oracle.yaml`, not a stopgap.
+
+**Ollama reachability via Tailscale**: installed on the Windows host
+directly (already listens on `0.0.0.0:11434` from the WSL2 setup) and on the
+Oracle VM (`curl -fsSL https://tailscale.com/install.sh | sudo sh`, then
+`sudo tailscale up`). **Pod-level DNS can NOT resolve Tailscale MagicDNS
+names** — verified live: `nslookup <host>.tail386db8.ts.net` from inside a
+throwaway pod returns `NXDOMAIN`, even though it resolves fine from the node
+shell. Root cause: the node's `/etc/resolv.conf` points at systemd-resolved's
+stub (`127.0.0.53`), which only proxies MagicDNS's split-DNS routing in the
+*host* network namespace — k3s's CoreDNS `forward` plugin reads that same
+file but runs in a different netns where `127.0.0.53` doesn't route
+anywhere, so it falls through to the real upstream
+(`169.254.169.254`, Oracle's own metadata DNS) which has never heard of
+`*.ts.net`. Fixed by using the stable Tailscale IP directly in
+`OLLAMA_BASE_URL` instead of the MagicDNS hostname (see the comment in
+`values-oracle.yaml`) — re-check that IP with `tailscale status` on the
+Windows host if it's ever reconfigured.
+
+**Real data cutover** (Postgres + n8n, from the live WSL2 cluster — not
+compose, since that cutover already happened in Phase 2/3 above): identical
+mechanics to the original Phase 2/3 cutover (`pg_dump`/`pg_restore`,
+tar/`kubectl cp` for n8n's SQLite file), just re-targeted at the Oracle
+kubeconfig for the restore side and briefly scaling the **WSL2** app to 0
+(not Oracle's) around the dump so production isn't mid-write. Verified: row
+counts matched exactly, `n8n`'s `database.sqlite` restored byte-for-byte.
+
+**Live traffic cutover**: Telegram's webhook re-pointed via the Bot API
+(`setWebhook`/`getWebhookInfo`, no console needed), Google OAuth's redirect
+URI added by hand in
+[console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials)
+(no API for this without existing service-account/gcloud setup) — the old
+ngrok redirect URI was left in place alongside the new one, no need to
+remove it. ngrok/WSL2 itself was **not** torn down — left running as inert
+cold-standby, same "stop what actively duplicates work, don't force-delete
+the rest" precedent as the original compose→k3s cutover.
+
+**Windows/WSL2 shell gotcha worth knowing**: `kubectl exec`/`cp` container-
+side path arguments (e.g. `/tmp/foo`) get silently mangled into Windows
+paths by Git Bash's MSYS path-conversion *unless* `MSYS_NO_PATHCONV=1` is
+set — but that same env var, if combined with a `KUBECONFIG=/c/Users/...`
+Unix-style path on the *same* command line, breaks KUBECONFIG resolution
+instead (kubectl.exe needs a real Windows path, and MSYS_NO_PATHCONV
+disables the auto-translation that would normally fix that up). Net effect:
+use a Windows-style path (`C:\Users\...`) for `KUBECONFIG` specifically, and
+`MSYS_NO_PATHCONV=1` for everything else touching container-side paths.
+
+### Terraform
+
+`terraform/` manages the four Helm releases (`cert-manager`,
+`cert-manager-config`, `lifeos`, `kube-prometheus-stack`) — only the `helm`
+provider, no `kubernetes` provider, so secrets stay structurally unreachable
+from Terraform. Provisioning the VM itself stays a manual one-time step (see
+above), not Terraform — free-tier capacity errors have nothing to do with
+IaC, and a network/firewall touched once and never again gets little upside
+from IaC relative to the risk of a botched automated apply against the only
+node.
+
+**State backend** — OCI Object Storage via its S3-compatible API (GitHub-hosted
+runners are ephemeral, so local state would look empty on every CI run and
+try to reinstall everything). One-time bootstrap, via the `oci` CLI
+(`pip install oci-cli` if not already present — needs `~/.oci/config` +
+API signing key, set up once via the OCI console's "Add API Key" flow):
+```bash
+oci iam customer-secret-key create --user-id <your-user-ocid> --display-name terraform-state-backend
+# save the returned "key" (secret) and "id" (access key) — the secret is shown ONCE, never retrievable again
+oci os bucket create --compartment-id <tenancy-ocid> --name lifeos-terraform-state --namespace <objectstorage-namespace>
+```
+`terraform/backend.tf` has the non-secret parts (bucket/endpoint/region)
+committed; the access/secret key pair is supplied via `AWS_ACCESS_KEY_ID`/
+`AWS_SECRET_ACCESS_KEY` env vars at `init`/`plan`/`apply` time — never
+committed, same discipline as every other secret in this project.
+
+**Deploy credential** — a scoped `ServiceAccount`/`ClusterRole`/
+`ClusterRoleBinding`/token `Secret`
+(`deploy/lifeos-deployer-rbac.yaml`), applied once by hand:
+```bash
+kubectl apply -f deploy/lifeos-deployer-rbac.yaml
+```
+Not cluster-admin, but genuinely broad within its scope — every API group
+the four releases actually touch (core, apps, batch, networking, cert-manager,
+kube-prometheus-stack's monitoring CRDs) plus `rbac.authorization.k8s.io`/
+`apiextensions.k8s.io` since `kube-prometheus-stack` manages its own
+RBAC/CRDs internally and Kubernetes won't let a principal grant permissions
+it doesn't itself hold. No node-level access, no wildcard `apiGroup`.
+Extract the values Terraform/CI need:
+```bash
+kubectl get secret lifeos-deployer-token -n lifeos-ci -o jsonpath="{.data.token}" | base64 -d    # -> kube_token / KUBE_TOKEN
+kubectl get secret lifeos-deployer-token -n lifeos-ci -o jsonpath="{.data.ca\.crt}"               # -> kube_cluster_ca_certificate / KUBE_CA_CERT (already base64, don't decode again)
+# kube_host / KUBE_API_SERVER = https://<vm-ip>:6443
+```
+
+**Local usage**: copy `terraform/terraform.tfvars.example` to
+`terraform.tfvars` (gitignored) and fill in the three values above, plus
+`image_tag` (any already-imported tag for a local run, since Terraform's
+deploy path always pulls from GHCR — see below — not the node's local
+containerd store).
+```bash
+cd terraform
+AWS_ACCESS_KEY_ID=<key> AWS_SECRET_ACCESS_KEY=<secret> terraform init
+terraform import helm_release.cert_manager cert-manager/cert-manager
+terraform import helm_release.cert_manager_config default/cert-manager-config
+terraform import helm_release.lifeos lifeos/lifeos
+terraform plan   # cert_manager / cert_manager_config should show zero-diff;
+                  # lifeos will show a real diff (image.* switching from the
+                  # local-import values to GHCR) until build-and-push has
+                  # actually pushed a real tag — don't apply that one until
+                  # then. kube_prometheus_stack has nothing to import (not
+                  # installed on this cluster yet) — creating it needs the
+                  # grafana-lifeos-pg Secret + grafana_ro Postgres role set
+                  # up first (Phase 4 above), so monitoring_enabled defaults
+                  # false until that's done.
+```
+
+### CI/CD
+
+`.github/workflows/tests.yml` now has three jobs: `test` (unchanged) →
+`build-and-push` (builds the root `Dockerfile`, pushes
+`ghcr.io/zawadzki-michal/lifeos-app:<short-sha>`, public package, no pull
+secret needed) → `deploy` (`terraform apply` with the new tag, then the
+migrate-Job dance: delete-then-create the `lifeos-migrate` Job, wait for
+completion, force-delete the app pod so it doesn't wait out
+`CrashLoopBackOff`'s backoff, `kubectl rollout status` as the real
+pass/fail gate — `helm_release.lifeos` sets `wait = false` precisely because
+a migration-bearing deploy legitimately crash-loops until that Job runs).
+Only on `push` to `master`, not PRs. `deploy`'s `concurrency: { group:
+lifeos-deploy, cancel-in-progress: false }` is what actually prevents two
+applies racing each other — the OCI backend has no native state locking.
+
+`.github/workflows/rollback.yml` — `workflow_dispatch` with an `image_tag`
+input, same `terraform apply` + force-rollout mechanics, no migration
+re-run (assumes backward-compatible schema, same assumption alembic-by-hand
+already relies on elsewhere).
+
+**GitHub repo secrets needed** (Settings → Secrets and variables → Actions):
+`TF_STATE_ACCESS_KEY` / `TF_STATE_SECRET_KEY` (the OCI Customer Secret Key
+pair from the Terraform bootstrap above), `KUBE_API_SERVER`, `KUBE_TOKEN`,
+`KUBE_CA_CERT` (the `lifeos-deployer` values above) — `GITHUB_TOKEN` for
+GHCR push is automatic, no setup needed.
+
+**Known local-Windows gotcha while bootstrapping any of this**: WSL2's
+`bash` auto-appends the interop Windows `PATH` (via `appendWindowsPath`),
+which contains spaces (`Program Files (x86)`) — an unquoted `$PATH` in a
+script (`export PATH=/foo:$PATH`) undergoes word-splitting on those spaces
+and throws `syntax error near unexpected token '('`. Always quote it
+(`"$PATH"`), or better, write multi-step scripts to a file and `bash
+script.sh` rather than long inline `-c` one-liners.

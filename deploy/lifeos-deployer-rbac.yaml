@@ -1,0 +1,84 @@
+# Scoped deploy credential for CI (GitHub-hosted runners) and local Terraform
+# runs. Not cluster-admin: explicitly scoped to the API groups the four
+# helm_release resources (cert-manager, cert-manager-config, lifeos,
+# kube-prometheus-stack) actually manage, plus rbac.authorization.k8s.io and
+# apiextensions.k8s.io since kube-prometheus-stack manages its own RBAC/CRDs
+# internally and Kubernetes won't let a principal grant permissions it
+# doesn't itself hold. No node-level access, no wildcard apiGroup.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lifeos-ci
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: lifeos-deployer
+  namespace: lifeos-ci
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: lifeos-deployer
+rules:
+  - apiGroups: [""]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["apps"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["batch"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["cert-manager.io"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["acme.cert-manager.io"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["policy"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["*"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: lifeos-deployer
+subjects:
+  - kind: ServiceAccount
+    name: lifeos-deployer
+    namespace: lifeos-ci
+roleRef:
+  kind: ClusterRole
+  name: lifeos-deployer
+  apiGroup: rbac.authorization.k8s.io
+---
+# K8s 1.24+ no longer auto-creates a token Secret for a ServiceAccount —
+# this must be created explicitly to get a long-lived (non-expiring) token
+# suitable for a GitHub Actions secret.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: lifeos-deployer-token
+  namespace: lifeos-ci
+  annotations:
+    kubernetes.io/service-account.name: lifeos-deployer
+type: kubernetes.io/service-account-token

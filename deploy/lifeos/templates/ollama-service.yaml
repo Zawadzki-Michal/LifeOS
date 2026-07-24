@@ -1,5 +1,6 @@
+{{- if .Values.ollama.serviceEnabled }}
 {{- if not .Values.ollama.hostIP }}
-{{- fail "values.ollama.hostIP is required — set it to the WSL2 default-route gateway IP (run `ip route show | grep default` inside the WSL2 distro). See deploy/README.md." }}
+{{- fail "values.ollama.hostIP is required when ollama.serviceEnabled is true — set it to the WSL2 default-route gateway IP (run `ip route show | grep default` inside the WSL2 distro). See deploy/README.md." }}
 {{- end }}
 # Selector-less Service + a hand-specified EndpointSlice: the standard k3s
 # pattern for reaching a plain IP (no in-cluster DNS name) that isn't part of
@@ -8,6 +9,11 @@
 # change across WSL2 restarts and needs re-checking if connectivity breaks.
 # (EndpointSlice, not the older Endpoints object, since Endpoints is
 # deprecated as of Kubernetes v1.33.)
+#
+# Only used on the WSL2 cluster. The Oracle cluster (values-oracle.yaml)
+# sets ollama.serviceEnabled: false and reaches Ollama via a real Tailscale
+# hostname in OLLAMA_BASE_URL instead — no selector-less-Service trick
+# needed once there's an actual resolvable DNS name.
 apiVersion: v1
 kind: Service
 metadata:
@@ -32,3 +38,4 @@ ports:
 endpoints:
   - addresses:
       - {{ .Values.ollama.hostIP }}
+{{- end }}

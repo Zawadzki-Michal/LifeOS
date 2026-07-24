@@ -1,0 +1,59 @@
+# Oracle Cloud cluster overrides — applied on top of values.yaml via:
+#   helm upgrade --install lifeos ./deploy/lifeos -n lifeos -f values.yaml -f values-oracle.yaml
+# The WSL2 cluster keeps using plain values.yaml (ngrok, gateway-IP Ollama)
+# as its cold-standby rollback config until decommission (v3 plan, Phase 7).
+
+# No GHCR image yet (Phase 5 wires real CI/CD publishing) — until then this
+# inherits values.yaml's local-import image settings unchanged (same
+# docker save | ctr images import flow as the WSL2 cluster, just piped over
+# SSH to this node instead of through `wsl`). Bump values.yaml's image.tag
+# and re-import on every real deploy, same discipline as before.
+
+ngrok:
+  enabled: false
+
+ingress:
+  enabled: true
+  # Decision (2026-07-24): permanent, not a stopgap. anna-zawadzka.pl's DNS
+  # is managed through a Getspace hosting panel whose zone editor doesn't
+  # actually publish to its own authoritative nameservers (ns3/ns4.getspace.us)
+  # — verified two ways: the apex record it displays doesn't match what's
+  # live, and a brand-new disposable test record never appeared either. Not
+  # a propagation delay, a broken panel. sslip.io resolves
+  # "<ip-with-dashes>.sslip.io" to that literal IP automatically, no
+  # account/setup — a real public DNS record, so Let's Encrypt's HTTP-01
+  # challenge works against it exactly like a normal domain. Chosen over
+  # DuckDNS to avoid depending on yet another third-party account, and it
+  # has the nice property of self-updating if this VM's IP ever changes.
+  host: "141-253-108-155.sslip.io"
+  clusterIssuer: "letsencrypt-prod"
+  tlsSecretName: "lifeos-tls"
+
+# Off-box backup: the WSL2 GoogleDrive-hostPath trick doesn't exist on a
+# real Linux VM. Disabled until the rclone cutover (Phase 6) — local PVC
+# backups keep running regardless (backup.enabled isn't a real key, the
+# CronJob itself is unconditional; this only gates the off-box leg).
+backup:
+  offBox:
+    enabled: false
+
+config:
+  GOOGLE_OAUTH_REDIRECT_URI: "https://141-253-108-155.sslip.io/api/auth/callback"
+  # Verified live (Phase 2): pod-level DNS can NOT resolve Tailscale MagicDNS
+  # names (lifeos-windows-host.tail386db8.ts.net -> NXDOMAIN from inside a
+  # pod) — the node's /etc/resolv.conf points at systemd-resolved's stub
+  # (127.0.0.53), which only proxies MagicDNS's split-DNS routing in the
+  # HOST network namespace; k3s's CoreDNS forward plugin reads that same
+  # file but runs in a different netns where 127.0.0.53 doesn't route
+  # anywhere useful, so it falls through to the real upstream
+  # (169.254.169.254, Oracle's own metadata DNS) which has never heard of
+  # *.ts.net. The plan's documented fallback applies: use the stable
+  # Tailscale IP directly (confirmed reachable from both the node shell and
+  # a throwaway in-cluster pod). Re-check this IP only if Tailscale is
+  # reconfigured on the Windows host (`tailscale status` there).
+  OLLAMA_BASE_URL: "http://100.94.199.76:11434"
+
+# The selector-less ollama Service + hostIP hack is WSL2-gateway-IP-specific
+# and doesn't apply here — Tailscale gives a stable IP instead (Phase 2).
+ollama:
+  serviceEnabled: false
