@@ -108,7 +108,7 @@ ngrok:
 # migration.
 ingress:
   enabled: false
-  host: ""
+  hosts: []
   clusterIssuer: "letsencrypt-prod"
   tlsSecretName: "lifeos-tls"
 

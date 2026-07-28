@@ -11,10 +11,13 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - {{ .Values.ingress.host | quote }}
+        {{- range .Values.ingress.hosts }}
+        - {{ . | quote }}
+        {{- end }}
       secretName: {{ .Values.ingress.tlsSecretName }}
   rules:
-    - host: {{ .Values.ingress.host | quote }}
+    {{- range .Values.ingress.hosts }}
+    - host: {{ . | quote }}
       http:
         paths:
           - path: /
@@ -23,5 +26,6 @@ spec:
               service:
                 name: lifeos-app
                 port:
-                  number: {{ .Values.app.port }}
+                  number: {{ $.Values.app.port }}
+    {{- end }}
 {{- end }}
