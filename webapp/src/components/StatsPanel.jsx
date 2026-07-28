@@ -27,7 +27,10 @@ export default function StatsPanel({ onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-surface">
-      <div className="flex items-center gap-3 border-b border-border p-4">
+      <div
+        className="flex items-center gap-3 border-b border-border p-4"
+        style={{ paddingTop: "max(1rem, env(safe-area-inset-top))" }}
+      >
         <h2 className="text-sm font-semibold text-ink">Stats</h2>
         <ModelPicker
           value={selected}
