@@ -231,11 +231,19 @@ async def get_health_summary(period: str = "week") -> str:
         lines.append(f"Resting heart rate: {avg_resting_hr} bpm avg")
 
     if workouts:
-        by_type: dict[str, int] = {}
-        for w in workouts:
-            by_type[w.workout_type] = by_type.get(w.workout_type, 0) + 1
-        workout_str = ", ".join(f"{n}x {t}" for t, n in by_type.items())
-        lines.append(f"Workouts: {len(workouts)} ({workout_str})")
+        lines.append(f"Workouts: {len(workouts)}")
+        for w in sorted(workouts, key=lambda w: w.start):
+            detail = [f"{float(w.duration_min):.0f} min"]
+            if w.active_kcal is not None:
+                detail.append(f"{float(w.active_kcal):.0f} kcal")
+            if w.avg_hr is not None:
+                detail.append(f"avg HR {w.avg_hr} bpm")
+            if w.max_hr is not None:
+                detail.append(f"max HR {w.max_hr} bpm")
+            if w.distance_km is not None:
+                detail.append(f"{float(w.distance_km):.2f} km")
+            day_str = w.start.astimezone(TZ).strftime("%a %Y-%m-%d")
+            lines.append(f"  - {w.workout_type} ({day_str}): {', '.join(detail)}")
     else:
         lines.append("Workouts: none logged")
 

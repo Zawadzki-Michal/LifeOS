@@ -1,6 +1,6 @@
 export default function LoginScreen() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-bg p-4">
+    <div className="flex min-h-dvh items-center justify-center bg-bg p-4">
       <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-8 text-center shadow-sm">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-accent text-lg font-semibold text-white">
           L

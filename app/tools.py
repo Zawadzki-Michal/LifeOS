@@ -512,9 +512,12 @@ TOOLS = [
             "name": "get_health_summary",
             "description": (
                 "Get an Apple Health/Fitness summary for a period — steps, active "
-                "energy burned, sleep, resting heart rate, and workouts. Use for "
-                "questions like 'how did I sleep this week' or 'how active was I "
-                "today'. Data only exists from whenever Apple Health sync was set up."
+                "energy burned, sleep, resting heart rate, and workouts (each "
+                "workout listed with its own duration, calories, and avg/max heart "
+                "rate). Use for questions like 'how did I sleep this week', 'how "
+                "active was I today', or 'how was my squash session'. Use period "
+                "'today' for questions about a workout done today. Data only "
+                "exists from whenever Apple Health sync was set up."
             ),
             "parameters": {
                 "type": "object",
