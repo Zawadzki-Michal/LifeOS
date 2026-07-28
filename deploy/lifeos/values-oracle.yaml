@@ -14,7 +14,8 @@ ngrok:
 
 ingress:
   enabled: true
-  # Decision (2026-07-24): permanent, not a stopgap. anna-zawadzka.pl's DNS
+  # sslip.io decision (2026-07-24): permanent, not a stopgap, kept as a
+  # fallback address alongside the real domain below. anna-zawadzka.pl's DNS
   # is managed through a Getspace hosting panel whose zone editor doesn't
   # actually publish to its own authoritative nameservers (ns3/ns4.getspace.us)
   # — verified two ways: the apex record it displays doesn't match what's
@@ -25,7 +26,16 @@ ingress:
   # challenge works against it exactly like a normal domain. Chosen over
   # DuckDNS to avoid depending on yet another third-party account, and it
   # has the nice property of self-updating if this VM's IP ever changes.
-  host: "141-253-108-155.sslip.io"
+  #
+  # lifeos.michalzawadzki.dev added 2026-07-28: a real owned domain, DNS-only
+  # (grey-cloud) A record at Cloudflare pointing straight at this VM's IP —
+  # proxying deliberately left off so cert-manager's HTTP-01 challenge hits
+  # the origin directly and the app's SSE/voice streaming and embedded
+  # Grafana iframe don't go through an extra proxying layer. Both hostnames
+  # share one Ingress/cert (SAN cert covers both).
+  hosts:
+    - "141-253-108-155.sslip.io"
+    - "lifeos.michalzawadzki.dev"
   clusterIssuer: "letsencrypt-prod"
   tlsSecretName: "lifeos-tls"
 
@@ -44,7 +54,7 @@ backup:
     rcloneRemote: "gdrive:lifeos-backups"
 
 config:
-  GOOGLE_OAUTH_REDIRECT_URI: "https://141-253-108-155.sslip.io/api/auth/callback"
+  GOOGLE_OAUTH_REDIRECT_URI: "https://lifeos.michalzawadzki.dev/api/auth/callback"
   # Verified live (Phase 2): pod-level DNS can NOT resolve Tailscale MagicDNS
   # names (lifeos-windows-host.tail386db8.ts.net -> NXDOMAIN from inside a
   # pod) — the node's /etc/resolv.conf points at systemd-resolved's stub
