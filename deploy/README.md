@@ -1,9 +1,13 @@
 # LifeOS deployment runbook
 
-**Current production**: the **Oracle Cloud cluster** (`141.253.108.155`,
-`https://141-253-108-155.sslip.io`) — real traffic, real data, Terraform-
-managed, full CI/CD (push to `master` auto-builds/deploys). See
-**"v3 — Oracle Cloud cluster"** below for everything specific to it
+**Current production**: the **Oracle Cloud cluster** (`141.253.108.155`) —
+real traffic, real data, Terraform-managed, full CI/CD (push to `master`
+auto-builds/deploys). Reachable at both **`https://lifeos.michalzawadzki.dev`**
+(the real domain, added 2026-07-28 — Cloudflare DNS-only A record, not
+proxied) and **`https://141-253-108-155.sslip.io`** (the original address,
+kept working as a fallback, not replaced). One Ingress/cert-manager SAN
+certificate covers both hostnames (`ingress.hosts` in `values-oracle.yaml`).
+See **"v3 — Oracle Cloud cluster"** below for everything specific to it
 (Terraform, CI/CD, Tailscale, rclone backups).
 
 **Cold-standby**: the original **WSL2 cluster** (this Windows machine,
@@ -443,6 +447,24 @@ permanently on `sslip.io`** instead (`141-253-108-155.sslip.io` resolves to
 that literal IP automatically, no account/setup, a real public DNS record so
 Let's Encrypt's HTTP-01 challenge works exactly like a normal domain) —
 baked into `values-oracle.yaml`, not a stopgap.
+
+**Real domain added (2026-07-28)**: `lifeos.michalzawadzki.dev`, a domain
+actually owned (unlike `anna-zawadzka.pl`'s broken panel above), DNS managed
+through Cloudflare. A single A record → `141.253.108.155`, **DNS-only /
+grey-cloud (proxy off)** — deliberate, not an oversight: Cloudflare's proxy
+would terminate TLS at its edge with its own certificate (making the
+Let's Encrypt cert cert-manager issues here irrelevant unless "Full
+(strict)" mode is also configured), and would add a layer that can
+buffer/interfere with the app's SSE chat streaming, voice, and embedded
+Grafana iframe for no benefit on a single personal-use origin. `ingress.host`
+(singular) became `ingress.hosts` (list) in the chart so both hostnames
+share one Ingress and one SAN certificate — sslip.io kept working
+throughout, not replaced. `GOOGLE_OAUTH_REDIRECT_URI` was switched to the
+new domain (the app sends one configured `redirect_uri`, not derived
+per-request from the Host header) — the matching Authorized redirect URI
+was added to the existing Google OAuth client in Cloud Console first, same
+"add the new one, leave the old one in place" precedent as the ngrok→sslip.io
+cutover above.
 
 **Ollama reachability via Tailscale**: installed on the Windows host
 directly (already listens on `0.0.0.0:11434` from the WSL2 setup) and on the
