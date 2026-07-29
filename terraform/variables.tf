@@ -40,7 +40,7 @@ variable "monitoring_enabled" {
 
 variable "cloudflare_api_token" {
   type        = string
-  description = "Cloudflare API token, scoped to Zone:DNS:Edit + Zone:Zone:Read on michalzawadzki.dev only — see deploy/README.md's Cloudflare DNS section for how to create it."
+  description = "Cloudflare API token, scoped to Zone:DNS:Edit on michalzawadzki.dev only — see deploy/README.md's Cloudflare DNS section for how to create it."
   sensitive   = true
 }
 

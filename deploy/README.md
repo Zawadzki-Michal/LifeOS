@@ -587,9 +587,12 @@ duplicate A record alongside the hand-made one.
 
 One-time setup:
 1. Cloudflare dashboard → My Profile → API Tokens → Create Token → custom
-   token scoped to **Zone / DNS / Edit** + **Zone / Zone / Read**, "Zone
-   Resources" restricted to `michalzawadzki.dev` only. Shown once — save it
-   as the `CLOUDFLARE_API_TOKEN` GitHub Actions **secret**
+   token scoped to just **Zone / DNS / Edit** (`cloudflare_record` takes the
+   zone ID directly as a variable, never looks it up by name, so
+   `Zone / Zone / Read` isn't needed), "Zone Resources" restricted to
+   `michalzawadzki.dev` only. Leave IP filtering unrestricted — GitHub-hosted
+   runners have no stable IP range to allowlist. Shown once — save it as the
+   `CLOUDFLARE_API_TOKEN` GitHub Actions **secret**
    (`gh secret set CLOUDFLARE_API_TOKEN`).
 2. Zone ID — dashboard → the domain's overview page → "API" box in the right
    sidebar. Not secret; save as the `CLOUDFLARE_ZONE_ID` GitHub Actions
