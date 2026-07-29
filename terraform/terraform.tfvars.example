@@ -3,7 +3,11 @@
 # kube_token / kube_cluster_ca_certificate: from the lifeos-deployer-token
 # Secret (deploy/lifeos-deployer-rbac.yaml) — see deploy/README.md's
 # Terraform section for the exact kubectl commands to extract them.
+# cloudflare_api_token / cloudflare_zone_id: see deploy/README.md's
+# Cloudflare DNS section.
 
 kube_host                   = "https://REPLACE_ME:6443"
 kube_token                  = "REPLACE_ME"
 kube_cluster_ca_certificate = "REPLACE_ME"
+cloudflare_api_token        = "REPLACE_ME"
+cloudflare_zone_id          = "REPLACE_ME"
