@@ -47,7 +47,9 @@ jobs:
             -var "kube_host=${{ vars.KUBE_API_SERVER }}" \
             -var "kube_token=${{ secrets.KUBE_TOKEN }}" \
             -var "kube_cluster_ca_certificate=${{ secrets.KUBE_CA_CERT }}" \
-            -var "image_tag=${{ inputs.image_tag }}"
+            -var "image_tag=${{ inputs.image_tag }}" \
+            -var "cloudflare_api_token=${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -var "cloudflare_zone_id=${{ vars.CLOUDFLARE_ZONE_ID }}"
 
       - name: Build runtime kubeconfig
         run: |

@@ -578,6 +578,44 @@ terraform plan   # cert_manager / cert_manager_config should show zero-diff;
                   # false until that's done.
 ```
 
+**Cloudflare DNS** — `terraform/dns.tf` manages the `lifeos.michalzawadzki.dev`
+A record via the `cloudflare` provider. The record already existed (created
+by hand on 2026-07-28, before it was Terraform-managed — see "Mobile
+safe-area fixes + custom domain" in `02-PROGRESS.md`), so it needs a one-time
+import rather than a plain `apply`, or Terraform will create a second,
+duplicate A record alongside the hand-made one.
+
+One-time setup:
+1. Cloudflare dashboard → My Profile → API Tokens → Create Token → custom
+   token scoped to just **Zone / DNS / Edit** (`cloudflare_record` takes the
+   zone ID directly as a variable, never looks it up by name, so
+   `Zone / Zone / Read` isn't needed), "Zone Resources" restricted to
+   `michalzawadzki.dev` only. Leave IP filtering unrestricted — GitHub-hosted
+   runners have no stable IP range to allowlist. Shown once — save it as the
+   `CLOUDFLARE_API_TOKEN` GitHub Actions **secret**
+   (`gh secret set CLOUDFLARE_API_TOKEN`).
+2. Zone ID — dashboard → the domain's overview page → "API" box in the right
+   sidebar. Not secret; save as the `CLOUDFLARE_ZONE_ID` GitHub Actions
+   **variable** (`gh variable set CLOUDFLARE_ZONE_ID`).
+3. Find the existing record's ID (the dashboard UI doesn't show it directly):
+   ```bash
+   curl -s -H "Authorization: Bearer <the API token>" \
+     "https://api.cloudflare.com/client/v4/zones/<zone_id>/dns_records?type=A&name=lifeos.michalzawadzki.dev" \
+     | jq '.result[0].id'
+   ```
+4. Import it into state — **run this before the next `terraform apply`**,
+   local or CI, or that apply creates a duplicate record instead of adopting
+   the existing one:
+   ```bash
+   cd terraform
+   terraform import cloudflare_record.lifeos <zone_id>/<record_id>
+   terraform plan   # should show zero-diff — same name/type/content/proxied
+                     # as the hand-created record. A non-empty diff here
+                     # means the values in dns.tf don't match reality; fix
+                     # dns.tf before applying, don't let apply "correct" a
+                     # production DNS record based on a guess.
+   ```
+
 ### CI/CD
 
 `.github/workflows/tests.yml` now has three jobs: `test` (unchanged) →

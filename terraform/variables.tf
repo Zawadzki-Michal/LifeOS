@@ -37,3 +37,14 @@ variable "monitoring_enabled" {
   default     = true
   description = "True by default since 2026-07-24 — kube-prometheus-stack is healthy and grafana-lifeos-pg/grafana_ro exist on the Oracle cluster now. Override to false only if standing up a fresh cluster from scratch before those prerequisites are in place."
 }
+
+variable "cloudflare_api_token" {
+  type        = string
+  description = "Cloudflare API token, scoped to Zone:DNS:Edit on michalzawadzki.dev only — see deploy/README.md's Cloudflare DNS section for how to create it."
+  sensitive   = true
+}
+
+variable "cloudflare_zone_id" {
+  type        = string
+  description = "Zone ID for michalzawadzki.dev (Cloudflare dashboard -> domain overview -> API section in the right sidebar). Not secret, but there's no reason to hardcode it either."
+}
